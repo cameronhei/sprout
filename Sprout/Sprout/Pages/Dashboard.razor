@@ -1,0 +1,305 @@
+﻿@page "/"
+@implements IDisposable
+@inject TaskStore Store
+@inject ToastService Toasts
+@inject SettingsStore Settings
+@inject ProjectStore Projects
+
+<PageTitle>Dashboard · Sprout</PageTitle>
+
+@{
+    var settings = Settings.Current;
+    var hoursLeft = Capacity.HoursLeftToday(settings, Store.Tasks, Today);
+    var ranked = Recommender.Rank(Store.Tasks, Today, hoursLeft, settings.BacklogOrder);
+    var actionable = ranked.Where(t => !t.IsBlocked && !Store.IsSkipped(t)).ToList();
+    var focus = actionable.FirstOrDefault();
+    var done = Week.DoneThisWeek(Store.Tasks, Today, settings.WeekStart);
+
+    var available = Capacity.AvailableOn(settings, Today);
+    var perDay = Capacity.PlannablePerDay(settings);
+    var doneToday = Capacity.DoneHoursOn(Store.Tasks, Today);
+    var firesToday = Fires.HoursOn(Store.Tasks, Today);
+    var leftThisWeek = Capacity.HoursLeftThisWeek(settings, Store.Tasks, Today);
+    var planned = Capacity.PlannedThisWeek(Store.Tasks, Today, settings.WeekStart);
+
+    // Top of Peter's own drag order (only once he has ordered his backlog).
+    var topOfList = focus is not null && settings.BacklogOrder.Count > 0
+        && BacklogOrder.Resolve(Store.Tasks.Where(t => t.Status == WorkStatus.Backlog), settings.BacklogOrder, Today).FirstOrDefault() == focus.Id;
+
+    // "Today changed": fires ate the time needed for what's due today.
+    var dueNow = Store.Tasks.Where(t => t.IsOpen && !t.IsBlocked && t.DueDate is not null && t.DueDate <= Today).ToList();
+    var dueNowHours = Math.Round(dueNow.Sum(Recommender.EstimatedHours), 1);
+    var needsReplan = firesToday > 0 && dueNowHours > hoursLeft;
+    var nextWorkday = NextWorkday(settings);
+    var firmToday = dueNow.Count(t => t.IsFirm);
+
+    var wrapUp = WrapUpItems(settings);
+}
+
+<div class="dash-head">
+    <div>
+        <div class="label">@DateTime.Now.ToString("dddd, MMMM d")</div>
+        <h1 class="greeting">@Greeting, Peter.</h1>
+        @if (ReviewCount > 0)
+        {
+            <a href="work" class="review-note">@ReviewNote</a>
+        }
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Dashboard view">
+        <button type="button" role="tab" class="tab @(tab == "today" ? "on" : "")"
+                @onclick='() => tab = "today"'>
+            Today
+        </button>
+        <button type="button" role="tab" class="tab @(tab == "week" ? "on" : "")"
+                @onclick='() => tab = "week"'>
+            This week
+        </button>
+    </div>
+</div>
+
+@if (tab == "today")
+{
+    @if (focus is not null)
+    {
+        <section class="focus" aria-label="Do this next">
+            <div class="focus-label">Do this next</div>
+            <div class="focus-title">@focus.Title</div>
+
+            <div class="chips">
+                <span class="chip on-dark">@TaskLabels.Size(focus)</span>
+                <span class="chip on-dark">@TaskLabels.Due(focus, Today)</span>
+                @if (focus.IsFirm)
+                {
+                    <span class="chip firm">Firm deadline</span>
+                }
+            </div>
+
+            <p class="why"><strong>Why this one:</strong> @Recommender.Why(focus, Today, hoursLeft, topOfList)</p>
+
+            <div class="actions">
+                <button type="button" class="btn btn-light" @onclick="() => MarkDone(focus)">Mark done</button>
+                <button type="button" class="btn btn-ghost" @onclick="() => Store.Skip(focus)">Not right now</button>
+                <button type="button" class="btn btn-ghost" @onclick="() => Open(focus)">Open task</button>
+                <a href="work" class="btn btn-ghost">Priorities changed</a>
+            </div>
+        </section>
+    }
+    else if (ranked.Count > 0)
+    {
+        <section class="card nothing">Nothing left that isn't blocked or skipped. Check what needs review, or call it a day.</section>
+    }
+    else
+    {
+        <section class="card nothing">Nothing to recommend yet. Quick-add a task above.</section>
+    }
+
+    @if (needsReplan)
+    {
+        <section class="card notice warm-card">
+            <div class="label warm-label">Today changed</div>
+            <div class="notice-text">
+                Fires took @firesToday h today, so what's due today (about @dueNowHours h) no longer fits the @hoursLeft h left.
+                Nothing was missed; pick what moves.
+            </div>
+            @foreach (var task in dueNow.Where(t => !t.IsFirm))
+            {
+                <div class="notice-row warm-line">
+                    <button type="button" class="linkish grow" @onclick="() => editing = task">@task.Title</button>
+                    <span class="chip">@TaskLabels.Size(task)</span>
+                    <button type="button" class="btn btn-small" @onclick="() => MoveTo(task, nextWorkday)">Move to @nextWorkday.DayOfWeek</button>
+                </div>
+            }
+            @if (firmToday > 0)
+            {
+                <div class="small-note">@firmToday firm-deadline @(firmToday == 1 ? "task stays" : "tasks stay") on today.</div>
+            }
+        </section>
+    }
+
+    @if (wrapUp.Count > 0)
+    {
+        <section class="card notice blue-card" aria-label="Before you wrap up">
+            <div class="notice-head">
+                <div class="label blue-label">Before you wrap up</div>
+                <span class="small-note">Loose ends that keep your numbers accurate. Nothing here is urgent.</span>
+            </div>
+            @foreach (var item in wrapUp)
+            {
+                <div class="notice-row blue-line">
+                    <span class="chip @item.ChipClass">@item.Kind</span>
+                    <span class="grow">@item.Text</span>
+                    <button type="button" class="btn btn-small" @onclick="item.Action">@item.ActionLabel</button>
+                    @if (item.SecondAction is not null)
+                    {
+                        <button type="button" class="btn btn-small" @onclick="item.SecondAction">@item.SecondLabel</button>
+                    }
+                </div>
+            }
+        </section>
+    }
+
+    <div class="grid">
+        <section class="card stat" style="--accent: var(--a1)">
+            <div class="label">Today</div>
+            <div class="big">@(available > 0 ? $"{hoursLeft} h left today" : "Day off")</div>
+            <div class="detail">@TodayDetail(perDay, firesToday, doneToday)</div>
+            <button type="button" class="link-btn" @onclick='() => tab = "week"'>
+                @(planned > leftThisWeek ? $"This week is over by {Math.Round(planned - leftThisWeek, 1)} h. See the week" : "See the week")
+            </button>
+        </section>
+
+        <section class="card stat" style="--accent: var(--a2)">
+            <div class="label">Up next</div>
+            @if (actionable.Count <= 1)
+            {
+                <div class="detail">Nothing else lined up.</div>
+            }
+            @foreach (var task in actionable.Skip(1).Take(3))
+            {
+                <div class="up-row">
+                    <button type="button" class="linkish" @onclick="() => Open(task)">@task.Title</button>
+                    <span class="chip @(task.IsFirm ? "firm" : "")">@DueChip(task)</span>
+                </div>
+            }
+        </section>
+
+        <section class="card stat" style="--accent: var(--a3)">
+            <div class="label">Done this week</div>
+            <div class="done-count">@done.Count</div>
+            <div class="detail">About @DoneHours(done) h estimated</div>
+            <a href="report" class="stat-link">Open weekly report</a>
+        </section>
+    </div>
+}
+else
+{
+    <WeekView />
+}
+
+@if (editing is not null)
+{
+    <TaskDialog Item="editing" InitialTab="@editingTab" OnClose="CloseDialog" />
+}
+
+@code {
+    private TaskItem? editing;
+    private string? editingTab;
+    private string tab = "today";
+
+    private record WrapItem(string Kind, string ChipClass, string Text, string ActionLabel, Func<Task> Action,
+        string? SecondLabel = null, Func<Task>? SecondAction = null);
+
+    private void Open(TaskItem task, string? tabName = null)
+    {
+        editing = task;
+        editingTab = tabName;
+    }
+
+    private void CloseDialog()
+    {
+        editing = null;
+        editingTab = null;
+    }
+
+    private List<WrapItem> WrapUpItems(SproutSettings settings)
+    {
+        var items = new List<WrapItem>();
+        var weekStart = Week.StartOf(Today, settings.WeekStart);
+
+        foreach (var fire in Store.Tasks.Where(t => t.Status == WorkStatus.Fire && t.Minutes is null && t.FireDate >= weekStart))
+        {
+            var when = Fires.WhenLabel(fire.FireDate, Today).ToLower();
+            items.Add(new WrapItem("Fire", "warm", $"{fire.Title} ({when}) needs a time and details", "Add details",
+                () => { Open(fire, "foutcome"); return Task.CompletedTask; }));
+        }
+
+        foreach (var task in Store.Tasks.Where(t => t.Status == WorkStatus.HandedOff && t.FollowUpOn is not null && t.FollowUpOn <= Today))
+        {
+            items.Add(new WrapItem("Follow up", "blue", $"Check with {task.HandedTo} on {task.Title}", "Open",
+                () => { Open(task); return Task.CompletedTask; },
+                "Take it back", () => TakeBack(task)));
+        }
+
+        foreach (var task in Store.Tasks.Where(t => t.Status == WorkStatus.NeedsReview).Take(3))
+        {
+            items.Add(new WrapItem("No size", "", task.Title, "Add size",
+                () => { Open(task, "planning"); return Task.CompletedTask; }));
+        }
+
+        return items;
+    }
+
+    private static DateOnly NextWorkday(SproutSettings settings)
+    {
+        var day = Today.AddDays(1);
+        while (Capacity.AvailableOn(settings, day) == 0 && day < Today.AddDays(30))
+        {
+            day = day.AddDays(1);
+        }
+        return day;
+    }
+
+    private async Task MoveTo(TaskItem task, DateOnly day)
+    {
+        var before = task.Clone();
+        await Store.UpdateAsync(task, t => t.DueDate = day, $"Moved to {day:MMM d} after fires took over today");
+        Toasts.Show($"Moved to {day.DayOfWeek}.", () => Store.ReplaceAsync(before));
+    }
+
+    private async Task TakeBack(TaskItem task)
+    {
+        var before = task.Clone();
+        await Store.UpdateAsync(task, t => t.Status = t.Size is null ? WorkStatus.NeedsReview : WorkStatus.Backlog, $"Taken back from {task.HandedTo}");
+        Toasts.Show("Back in your backlog.", () => Store.ReplaceAsync(before));
+    }
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    private static string Greeting =>
+        DateTime.Now.Hour >= 17 ? "Good evening" :
+        DateTime.Now.Hour >= 12 ? "Good afternoon" : "Good morning";
+
+    private int ReviewCount => Store.Tasks.Count(t => t.Status == WorkStatus.NeedsReview);
+
+    private string ReviewNote => ReviewCount == 1 ? "1 task needs review" : $"{ReviewCount} tasks need review";
+
+    private string DueChip(TaskItem task) => (task.IsFirm ? "Firm · " : "") + TaskLabels.Due(task, Today);
+
+    private static double DoneHours(List<TaskItem> done) => done.Sum(Recommender.EstimatedHours);
+
+    private async Task MarkDone(TaskItem task)
+    {
+        var before = Store.Snapshot();
+        var next = await Store.CompleteAsync(task);
+
+        var count = Week.DoneThisWeek(Store.Tasks, Today, Settings.Current.WeekStart).Count;
+        var message = count == 1
+            ? "Done. That's your first one this week."
+            : $"Done. That's {count} things finished this week.";
+
+        if (next?.DueDate is not null)
+        {
+            message += $" The next one is due {next.DueDate.Value:MMM d}.";
+        }
+
+        Toasts.Show(message, () => Store.RestoreAsync(before));
+    }
+
+    private static string TodayDetail(double perDay, double firesToday, double doneToday) =>
+        $"{perDay} h plannable today" +
+        (firesToday > 0 ? $", minus {firesToday} h of logged fires" : "") +
+        (doneToday > 0 ? $", minus about {doneToday} h done (estimated)" : "") + ".";
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += StateHasChanged;
+        Settings.Changed += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        Store.Changed -= StateHasChanged;
+        Settings.Changed -= StateHasChanged;
+    }
+}

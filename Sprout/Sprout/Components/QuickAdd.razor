@@ -1,0 +1,83 @@
+﻿@inject TaskStore Store
+@inject ToastService Toasts
+
+<div class="capture">
+    <label for="capture" class="visually-hidden">Capture a task</label>
+    <input id="capture" class="field"
+           placeholder="Something on your mind? Drop it here and review it later"
+           @bind="text" @bind:event="oninput"
+           @onkeydown="OnKeyDown" />
+    <button type="button" class="btn btn-primary" @onclick="Add">Quick add</button>
+    <button type="button" class="btn" @onclick="() => showLog = true">I got pulled into something</button>
+</div>
+
+@if (showLog)
+{
+    <div class="card log">
+        <label for="logtext" class="log-label">What pulled you away? Add the details once the fire is out.</label>
+        <input id="logtext" class="field" placeholder="e.g. Production hold on Line 2"
+               @bind="logText" @bind:event="oninput" @onkeydown="OnLogKeyDown" />
+        <button type="button" class="btn btn-primary btn-fire" @onclick="Log">Log it</button>
+        <button type="button" class="btn" @onclick="CloseLog">Cancel</button>
+    </div>
+}
+
+@code {
+    private string text = "";
+    private bool showLog;
+    private string logText = "";
+
+    private async Task Add()
+    {
+        var title = text;
+        text = "";
+
+        var task = await Store.QuickAddAsync(title);
+
+        if (task is not null)
+        {
+            Toasts.Show("Captured. It can be recommended now; add a size when you have a minute.",
+                () => Store.RemoveAsync(task.Id));
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Add();
+        }
+    }
+
+    private async Task Log()
+    {
+        var fire = await Store.LogFireAsync(logText);
+
+        if (fire is null)
+        {
+            return;
+        }
+
+        CloseLog();
+        Toasts.Show("Logged. Add how long it took once the fire is out; it'll be on your wrap-up list.",
+            () => Store.RemoveAsync(fire.Id));
+    }
+
+    private async Task OnLogKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Log();
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseLog();
+        }
+    }
+
+    private void CloseLog()
+    {
+        showLog = false;
+        logText = "";
+    }
+}

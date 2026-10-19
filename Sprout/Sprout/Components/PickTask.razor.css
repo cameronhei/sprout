@@ -1,0 +1,43 @@
+﻿.pick-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+}
+
+.pick {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-height: 32px;
+    cursor: pointer;
+}
+
+.pick input {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin: 2px 0 0;
+    accent-color: var(--primary);
+}
+
+.pick-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.title { font-weight: 500; }
+
+.detail {
+    font-size: 13px;
+    color: #56646A;
+}
+
+.note {
+    width: calc(100% - 28px);
+    min-height: 40px;
+    margin-left: 28px;
+    font-size: 14px;
+}

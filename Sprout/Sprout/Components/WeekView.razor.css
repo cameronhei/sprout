@@ -1,0 +1,244 @@
+.week {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+    .week .card {
+        margin-top: 0;
+    }
+
+.summary {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.headline {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 26px;
+    font-weight: 600;
+}
+
+.bar {
+    height: 16px;
+    background: #E3E9E5;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.fill {
+    height: 100%;
+    background: var(--primary);
+    border-radius: 999px;
+}
+
+    .fill.over {
+        background: #B8641F;
+    }
+
+.note {
+    margin: 0;
+    font-size: 15px;
+    color: #56646A;
+}
+
+.math-toggle {
+    align-self: flex-start;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary-text);
+    min-height: 32px;
+}
+
+.math {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+    color: #3A484D;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.days {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.day {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 118px;
+    padding: 14px;
+    border: 1px solid #DCE2DE;
+    border-radius: 12px;
+    background: #FFFFFF;
+}
+
+    .day.today {
+        border: 2px solid var(--primary);
+    }
+
+    .day.past {
+        background: #F4F6F5;
+        opacity: 0.75;
+    }
+
+    .day.off {
+        background: #F5F8FC;
+    }
+
+.day-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.day-name {
+    font-weight: 600;
+}
+
+.day-date {
+    font-size: 13px;
+    color: #56646A;
+}
+
+.day-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: #3A484D;
+}
+
+    .day-rows div {
+        display: flex;
+        justify-content: space-between;
+    }
+
+.fire {
+    color: #9A4F14;
+}
+
+.done {
+    color: var(--primary-text);
+}
+
+.chip.off-chip {
+    align-self: flex-start;
+    background: #DDE6F2;
+    color: #23406A;
+}
+
+.day-tag {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #56646A;
+}
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 22px;
+}
+
+.stat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 4px solid var(--accent);
+}
+
+.tradeoffs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-color: #E2B98F;
+}
+
+.label.warn {
+    color: #7A3F10;
+}
+
+.tradeoffs .note {
+    margin-bottom: 8px;
+}
+
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+}
+
+.grow {
+    flex: 1 1 240px;
+}
+
+.fits {
+    background: var(--tint);
+    border-color: var(--deep-muted);
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--deep);
+}
+
+.review {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+    .review ul {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+.coming {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+    .coming .label {
+        margin-bottom: 8px;
+    }
+
+    .coming .row {
+        padding: 6px 0;
+    }
+
+.reflect {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 32px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.check input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--primary);
+}

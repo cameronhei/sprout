@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Sprout.Core.Tests/Sprout.Core.Tests.csproj" />
+  <Project Path="Sprout.Core/Sprout.Core.csproj" />
+  <Project Path="Sprout/Sprout.csproj" />
+</Solution>

@@ -1,0 +1,281 @@
+﻿@page "/projects"
+@implements IDisposable
+@inject TaskStore Store
+@inject SettingsStore Settings
+@inject ProjectStore Projects
+@inject MeetingStore MeetingList
+@inject ToastService Toasts
+
+<PageTitle>Projects &amp; Meetings · Sprout</PageTitle>
+
+<div class="page">
+    <div class="page-head">
+        <div>
+            <h1>@(showMeetings ? "Meetings" : "Projects")</h1>
+            <div class="intro">
+                @(showMeetings
+                    ? "Set each one up once. Its prep tasks land in your backlog before every meeting."
+                    : "Ongoing work. Each project’s weekly update builds itself from its linked tasks.")
+            </div>
+        </div>
+        <div class="head-actions">
+            <div class="pill" role="tablist" aria-label="Projects or meetings">
+                <button type="button" role="tab" aria-selected="@(!showMeetings ? "true" : "false")"
+                        class="pill-tab @(!showMeetings ? "on" : "")" @onclick="() => showMeetings = false">Projects</button>
+                <button type="button" role="tab" aria-selected="@(showMeetings ? "true" : "false")"
+                        class="pill-tab @(showMeetings ? "on" : "")" @onclick="() => showMeetings = true">Meetings</button>
+            </div>
+            @if (showMeetings)
+            {
+                <button type="button" class="btn btn-primary" @onclick="() => OpenMeeting(null)">New meeting</button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-primary" @onclick="() => OpenProject(null)">New project</button>
+            }
+        </div>
+    </div>
+
+    @if (!showMeetings)
+    {
+        var current = Projects.All.Where(p => p.Status != ProjectStatus.Done)
+                                  .OrderBy(p => p.Status == ProjectStatus.OnHold).ThenBy(p => p.CreatedAt).ToList();
+        var finished = Projects.All.Where(p => p.Status == ProjectStatus.Done).OrderBy(p => p.Name).ToList();
+
+        @if (current.Count == 0)
+        {
+            <section class="card empty">
+                No projects yet. Add one for each piece of ongoing work, then link tasks to it from their Planning tab.
+            </section>
+        }
+        else
+        {
+            <div class="cards">
+                @foreach (var project in current)
+                {
+                    var lines = ProjectLines.For(project.Id, Store.Tasks, Today, Settings.Current.WeekStart);
+                    var doneCount = lines.Count(l => l.Kind == "Done");
+                    var openCount = ProjectLines.OpenCount(project.Id, Store.Tasks);
+
+                    <section class="card item @(project.Status == ProjectStatus.OnHold ? "dim" : "")">
+                        <div class="item-head">
+                            <button type="button" class="linkish name" @onclick="() => OpenProject(project)">@project.Name</button>
+                            <span class="chip @(project.Status == ProjectStatus.Active ? "green" : "")">@StatusLabel(project.Status)</span>
+                        </div>
+                        <div class="chips">
+                            <span class="chip @(doneCount > 0 ? "green" : "")">
+                                @(doneCount > 0 ? $"{doneCount} done this week" : "No activity this week")
+                            </span>
+                            @if (openCount > 0)
+                            {
+                                <span class="chip">@(openCount == 1 ? "1 open task" : $"{openCount} open tasks")</span>
+                            }
+                        </div>
+                        @if (lines.Count > 0)
+                        {
+                            <ul class="lines">
+                                @foreach (var line in lines)
+                                {
+                                    <li><strong>@line.Kind:</strong> <button type="button" class="linkish line-link" @onclick="() => OpenTask(line.TaskId)">@line.Text</button></li>
+                                }
+                            </ul>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(project.Note))
+                        {
+                            <div class="note">@project.Note</div>
+                        }
+                        <div class="actions">
+                            <button type="button" class="btn btn-small" @onclick="() => OpenProject(project)">Open</button>
+                        </div>
+                    </section>
+                }
+            </div>
+        }
+
+        @if (finished.Count > 0)
+        {
+            <section class="card finished">
+                <div class="label">Finished projects</div>
+                @foreach (var project in finished)
+                {
+                    <div class="finished-row">
+                        <button type="button" class="linkish muted" @onclick="() => OpenProject(project)">@project.Name</button>
+                    </div>
+                }
+            </section>
+        }
+    }
+    else
+    {
+        var meetings = MeetingList.Upcoming.ToList();
+
+        @if (meetings.Count == 0)
+        {
+            <section class="card empty">
+                No meetings yet. Add your monthly meetings and reports here, and their prep shows up in your backlog on time.
+            </section>
+        }
+        else
+        {
+            <div class="cards">
+                @foreach (var meeting in meetings)
+                {
+                    var days = meeting.NextDate.DayNumber - Today.DayNumber;
+                    var last = Meetings.LastHeld(meeting);
+                    var lastRecord = meeting.History.OrderBy(h => h.Date).LastOrDefault();
+                    var prep = Meetings.CycleTasks(meeting, Store.Tasks);
+                    var doneCount = prep.Count(t => t.Status == WorkStatus.Done);
+
+                    <section class="card item">
+                        <div class="item-head">
+                            <button type="button" class="linkish name" @onclick="() => OpenMeeting(meeting)">@meeting.Name</button>
+                            <span class="chip @(days <= 7 ? "green" : "")">@Meetings.WhenText(meeting.NextDate, Today)</span>
+                        </div>
+                        <div class="sub">
+                            @meeting.NextDate.ToString("dddd, MMM d")@(last is null ? "" : $" (last: {last.Value:MMM d})") · @Meetings.ScheduleText(meeting.Rule)
+                        </div>
+                        <div class="prep">
+                            <div class="prep-head">
+                                <div class="label">Prep</div>
+                                <span class="chip @(prep.Count > 0 && doneCount == prep.Count ? "green" : "")">
+                                    @(prep.Count > 0 ? $"{doneCount} of {prep.Count} done" : "None")
+                                </span>
+                            </div>
+                            @foreach (var task in prep)
+                            {
+                                var done = task.Status == WorkStatus.Done;
+                                var title = Meetings.PrepTitle(meeting, task);
+
+                                <div class="prep-row">
+                                    <input type="checkbox" aria-label="Mark @title done" checked="@done" @onchange="() => TogglePrep(task)" />
+                                    <button type="button" class="linkish prep-title @(done ? "done" : "")" @onclick="() => Open(task)">@title</button>
+                                    <span class="prep-when">
+                                        @(done ? "Done" : task.Status == WorkStatus.NeedsReview ? "Needs review" : TaskLabels.Due(task, Today))
+                                    </span>
+                                </div>
+                            }
+                            @if (prep.Count == 0)
+                            {
+                                <div class="muted small">No prep set up.</div>
+                            }
+                        </div>
+                        @if (lastRecord is not null && !string.IsNullOrWhiteSpace(lastRecord.Notes))
+                        {
+                            var text = lastRecord.Notes.Trim();
+                            <div class="note last">
+                                <span class="label">Last time · @lastRecord.Date.ToString("MMM d")</span>
+                                <span class="last-text">@(text.Length > 160 ? text[..157] + "…" : text)</span>
+                            </div>
+                        }
+                        <div class="actions">
+                            <button type="button" class="btn btn-small" @onclick="() => OpenMeeting(meeting)">Open</button>
+                            <button type="button" class="btn btn-small" @onclick="() => OpenMeeting(meeting, notes: true)">Meeting notes</button>
+                        </div>
+                    </section>
+                }
+            </div>
+        }
+    }
+</div>
+
+@if (editingProject)
+{
+    <ProjectDialog Item="project" OnOpenTask="Open" OnClose="() => editingProject = false" />
+}
+
+@if (editingMeeting)
+{
+    <MeetingDialog Item="meeting" StartOnNotes="meetingNotes" OnOpenTask="Open" OnClose="() => editingMeeting = false" />
+}
+
+@if (editingTask is not null)
+{
+    <TaskDialog Item="editingTask" OnClose="() => editingTask = null" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? Tab { get; set; }
+
+    private bool showMeetings;
+
+    private bool editingProject;
+    private Project? project;
+
+    private bool editingMeeting;
+    private Meeting? meeting;
+    private bool meetingNotes;
+
+    private TaskItem? editingTask;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    protected override void OnInitialized()
+    {
+        showMeetings = Tab == "meetings";
+
+        Store.Changed += Refresh;
+        Projects.Changed += Refresh;
+        MeetingList.Changed += Refresh;
+    }
+
+    public void Dispose()
+    {
+        Store.Changed -= Refresh;
+        Projects.Changed -= Refresh;
+        MeetingList.Changed -= Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private static string StatusLabel(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Active => "Active",
+        ProjectStatus.OnHold => "On hold",
+        _ => "Finished"
+    };
+
+    private void OpenProject(Project? item)
+    {
+        project = item;
+        editingProject = true;
+    }
+
+    private void OpenMeeting(Meeting? item, bool notes = false)
+    {
+        meeting = item;
+        meetingNotes = notes;
+        editingMeeting = true;
+    }
+
+    private void Open(TaskItem task) => editingTask = task;
+
+    private void OpenTask(Guid id)
+    {
+        var task = Store.Find(id);
+        if (task is not null)
+        {
+            editingTask = task;
+        }
+    }
+
+    private async Task TogglePrep(TaskItem task)
+    {
+        var before = task.Clone();
+
+        if (task.Status == WorkStatus.Done)
+        {
+            await Store.UpdateAsync(task, t =>
+            {
+                t.Status = WorkStatus.Backlog;
+                t.CompletedAt = null;
+            }, "Reopened");
+            Toasts.Show("Prep reopened.", () => Store.ReplaceAsync(before));
+            return;
+        }
+
+        var snapshot = Store.Snapshot();
+        await Store.CompleteAsync(task);
+        Toasts.Show("Prep done. The meeting is updated.", () => Store.RestoreAsync(snapshot));
+    }
+}

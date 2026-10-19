@@ -1,0 +1,23 @@
+﻿.controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-left: 28px;
+}
+
+.short { min-height: 32px; }
+
+.editor {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-left: 28px;
+}
+
+.editor textarea { font-size: 14px; }
+
+.hint {
+    font-size: 12px;
+    color: #56646A;
+}

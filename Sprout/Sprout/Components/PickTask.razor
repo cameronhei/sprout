@@ -1,0 +1,22 @@
+﻿@* One task in the report's Priorities picker: a tick box, and an Actions note once it's picked. *@
+
+<div class="pick-row">
+    <label class="pick">
+        <input type="checkbox" checked="@Item.Picked" @onchange="() => OnToggle.InvokeAsync()" />
+        <span class="pick-text">
+            <span class="title">@Item.Task.Title</span>
+            <span class="detail">@Item.Detail</span>
+        </span>
+    </label>
+    @if (Item.Picked)
+    {
+        <input class="field note" aria-label="Action for @Item.Task.Title" placeholder="Action (defaults to “@Item.DefaultAction”)"
+               value="@Item.Note" @onchange="e => OnNote.InvokeAsync(e)" />
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PriorityTask Item { get; set; } = default!;
+    [Parameter] public EventCallback OnToggle { get; set; }
+    [Parameter] public EventCallback<ChangeEventArgs> OnNote { get; set; }
+}

@@ -1,0 +1,411 @@
+﻿@inject TaskStore Store
+@inject ToastService Toasts
+@inject ProjectStore Projects
+
+<div class="overlay">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="m-heading">
+        <div class="dialog-head">
+            <div class="head-text">
+                <span class="chip status @(IsWarm ? "warm" : "")">@StatusLabel</span>
+                <h2 id="m-heading">@(string.IsNullOrWhiteSpace(draft.Title) ? "Untitled task" : draft.Title.Trim())</h2>
+            </div>
+            <button type="button" class="close" aria-label="Close" @onclick="Cancel">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+        </div>
+
+        <div class="modal-tabs" role="tablist" aria-label="Task sections">
+            @foreach (var (key, label) in Tabs)
+            {
+                <button type="button" role="tab" aria-selected="@(tab == key ? "true" : "false")"
+                        class="modal-tab @(tab == key ? "on" : "")" @onclick="() => tab = key">
+                    @label
+                </button>
+            }
+        </div>
+
+        <div class="dialog-body">
+            @switch (tab)
+            {
+                case "details":
+                    <div class="stack grow">
+                        <div class="field-wrap">
+                            <label for="m-title" class="label">Title</label>
+                            <input id="m-title" class="field" @bind="draft.Title" @bind:event="oninput" />
+                            @if (formError is not null)
+                            {
+                                <div role="alert" class="error">@formError</div>
+                            }
+                        </div>
+                        <div class="field-wrap grow">
+                            <label for="m-desc" class="label">Description</label>
+                            <textarea id="m-desc" class="field grow" placeholder="What does done look like? Who's involved?"
+                                      @bind="draft.Description"></textarea>
+                        </div>
+                    </div>
+                    break;
+
+                case "planning":
+                    <div class="stack">
+                        <div class="grid3">
+                            <div class="field-wrap">
+                                <label for="m-size" class="label">Size</label>
+                                <select id="m-size" class="field" @bind="draft.Size">
+                                    <option value="">Choose a size</option>
+                                    <option value="@TaskSize.XS">Extra small · under 30 min</option>
+                                    <option value="@TaskSize.S">Small · about 1 h</option>
+                                    <option value="@TaskSize.M">Medium · about 2.5 h</option>
+                                    <option value="@TaskSize.L">Large · about 4 h</option>
+                                    <option value="@TaskSize.XL">Extra large · 6 h or more</option>
+                                </select>
+                            </div>
+                            <div class="field-wrap">
+                                <label for="m-due" class="label">Due date</label>
+                                <input id="m-due" class="field" type="date" @bind="draft.DueDate" />
+                            </div>
+                            <div class="field-wrap">
+                                <label for="m-impact" class="label">Impact</label>
+                                <select id="m-impact" class="field" @bind="draft.Impact">
+                                    <option value="">How much if it slips?</option>
+                                    <option value="@ImpactLevel.Low">Low</option>
+                                    <option value="@ImpactLevel.Medium">Medium</option>
+                                    <option value="@ImpactLevel.High">High</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="field-wrap">
+                            <label for="m-proj" class="label">Project (optional)</label>
+                            <select id="m-proj" class="field" value="@(draft.ProjectId?.ToString() ?? "")" @onchange="OnProjectChanged">
+                                <option value="">No project</option>
+                                @foreach (var project in ProjectOptions)
+                                {
+                                    <option value="@project.Id">@project.Name</option>
+                                }
+                            </select>
+                        </div>
+
+                        @if (draft.Size is null)
+                        {
+                            <div class="warn-note">Add a size so this counts toward your week properly. Until then it's treated as Small.</div>
+                        }
+
+                        <div class="divided">
+                            <ToggleRow Title="Firm deadline"
+                                       Hint="@(draft.IsFirm ? "Can't move: flagged on Today and never suggested as a trade-off" : "Turn on if this date can't move")"
+                                       @bind-Value="draft.IsFirm" />
+                        </div>
+
+                        <div class="divided stack-tight">
+                            <ToggleRow Title="Repeat this task" Hint="@RepeatHint"
+                                       Value="draft.Repeat is not null" ValueChanged="ToggleRepeat" />
+                            @if (draft.Repeat is not null)
+                            {
+                                <div class="panel">
+                                    <div class="grid2">
+                                        <div class="field-wrap">
+                                            <label for="m-every" class="label">Repeat every</label>
+                                            <input id="m-every" class="field" type="number" min="1" @bind="draft.Repeat.Every" />
+                                        </div>
+                                        <div class="field-wrap">
+                                            <label for="m-unit" class="label">Unit</label>
+                                            <select id="m-unit" class="field" @bind="draft.Repeat.Unit">
+                                                <option value="@RepeatUnit.Day">Day(s)</option>
+                                                <option value="@RepeatUnit.Week">Week(s)</option>
+                                                <option value="@RepeatUnit.Month">Month(s)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    @if (draft.Repeat.Unit == RepeatUnit.Week)
+                                    {
+                                        <div class="field-wrap">
+                                            <div class="label" id="m-days">On these days</div>
+                                            <div class="days" role="group" aria-labelledby="m-days">
+                                                @foreach (var day in WeekDays)
+                                                {
+                                                    var on = draft.Repeat.Days.Contains(day);
+                                                    <button type="button" class="day-btn @(on ? "on" : "")" aria-pressed="@(on ? "true" : "false")"
+                                                            @onclick="() => ToggleDay(day)">
+                                                        @Repeats.ShortDay(day)
+                                                    </button>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        <div class="divided stack-tight">
+                            <ToggleRow Title="Blocked"
+                                       Hint="@(draft.IsBlocked ? "Won't be recommended until you unblock it" : "Waiting on someone or something")"
+                                       @bind-Value="draft.IsBlocked" />
+                            @if (draft.IsBlocked)
+                            {
+                                <div class="panel">
+                                    <label for="m-waiting" class="label">Waiting on</label>
+                                    <input id="m-waiting" class="field" placeholder="e.g. HR start date, lab results" @bind="draft.BlockedBy" />
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    break;
+
+                case "fdetails":
+                    <div class="stack grow">
+                        <div class="field-wrap">
+                            <label for="m-ftitle" class="label">What happened</label>
+                            <input id="m-ftitle" class="field" @bind="draft.Title" @bind:event="oninput" />
+                            @if (formError is not null)
+                            {
+                                <div role="alert" class="error">@formError</div>
+                            }
+                        </div>
+                        <div class="field-wrap">
+                            <label for="m-fcat" class="label">Type</label>
+                            <select id="m-fcat" class="field" @bind="draft.FireCategory">
+                                <option value="">Not set</option>
+                                @foreach (var category in Fires.Categories)
+                                {
+                                    <option value="@category">@category</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="field-wrap">
+                            <label for="m-by" class="label">Who pulled you in?</label>
+                            <input id="m-by" class="field" placeholder="e.g. Plant manager, a retailer, night shift lead" @bind="draft.RequestedBy" />
+                        </div>
+                        <div class="field-wrap grow">
+                            <label for="m-why" class="label">Why were you involved?</label>
+                            <textarea id="m-why" class="field grow" placeholder="What did they need from quality? Why you and not someone else?"
+                                      @bind="draft.Description"></textarea>
+                        </div>
+                    </div>
+                    break;
+
+                case "foutcome":
+                    <div class="stack grow">
+                        <div class="grid2">
+                            <div class="field-wrap">
+                                <label for="m-fdate" class="label">When</label>
+                                <input id="m-fdate" class="field" type="date" @bind="draft.FireDate" />
+                            </div>
+                            <div class="field-wrap">
+                                <label for="m-min" class="label">Time spent</label>
+                                <select id="m-min" class="field" @bind="draft.Minutes">
+                                    <option value="">How long did it take?</option>
+                                    @foreach (var (minutes, label) in Durations)
+                                    {
+                                        <option value="@minutes">@label</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                        <div class="small-note">Time spent comes out of that day's capacity.</div>
+                        <div class="field-wrap grow">
+                            <label for="m-outcome" class="label">Outcome</label>
+                            <textarea id="m-outcome" class="field grow" placeholder="How was it resolved? Anything still open?"
+                                      @bind="draft.Outcome"></textarea>
+                        </div>
+                    </div>
+                    break;
+
+                case "notes":
+                    <div class="stack grow">
+                        <div class="field-wrap">
+                            <label for="m-note" class="label">Add a note</label>
+                            <textarea id="m-note" class="field" rows="3"
+                                      placeholder="Anything you'll want to remember later: contacts, decisions, lot numbers…"
+                                      @bind="newNote" @bind:event="oninput"></textarea>
+                            <button type="button" class="btn btn-small end" @onclick="AddNote">Add note</button>
+                        </div>
+                        <div class="note-list">
+                            @if (draft.Notes.Count == 0)
+                            {
+                                <div class="muted">No notes yet.</div>
+                            }
+                            @foreach (var note in draft.Notes)
+                            {
+                                <div class="note">
+                                    <div class="note-text">@note.Text</div>
+                                    <div class="note-when">@note.At.ToString("MMM d, h:mm tt")</div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    break;
+
+                default:
+                    <ol class="activity">
+                        @foreach (var entry in Enumerable.Reverse(draft.Activity))
+                        {
+                            <li>
+                                <span class="dot" aria-hidden="true"></span>
+                                <span class="activity-text">@entry.Text</span>
+                                <span class="activity-when">@entry.At.ToString("MMM d, h:mm tt")</span>
+                            </li>
+                        }
+                    </ol>
+                    break;
+            }
+        </div>
+
+        <div class="dialog-foot">
+            <button type="button" class="btn" @onclick="Cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" @onclick="Save">Save</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TaskItem Item { get; set; } = default!;
+    [Parameter] public string? InitialTab { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static readonly DayOfWeek[] WeekDays =
+    [
+        DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday,
+        DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday
+    ];
+
+    private static readonly (int Minutes, string Label)[] Durations =
+    [
+        (15, "15 min"), (30, "30 min"), (45, "45 min"), (60, "1 h"), (90, "1.5 h"),
+        (120, "2 h"), (180, "3 h"), (240, "4 h"), (360, "6 h"), (480, "Full day")
+    ];
+
+    private TaskItem draft = new();
+    private string tab = "details";
+    private string newNote = "";
+    private string? formError;
+
+    private bool IsFire => Item.Status == WorkStatus.Fire;
+
+    protected override void OnInitialized()
+    {
+        draft = Item.Clone();
+
+        if (IsFire)
+        {
+            tab = InitialTab is "foutcome" or "notes" or "activity" ? InitialTab : "fdetails";
+        }
+        else
+        {
+            // A quick add with a title opens on Planning, where the missing size is.
+            tab = InitialTab ?? (Item.Status == WorkStatus.NeedsReview ? "planning" : "details");
+        }
+    }
+
+    private IEnumerable<(string Key, string Label)> Tabs
+    {
+        get
+        {
+            var notes = draft.Notes.Count > 0 ? $"Notes ({draft.Notes.Count})" : "Notes";
+
+            if (IsFire)
+            {
+                yield return ("fdetails", "Details");
+                yield return ("foutcome", draft.Minutes is null ? "Time & outcome · 1 to set" : "Time & outcome");
+            }
+            else
+            {
+                yield return ("details", "Details");
+                yield return ("planning", draft.Size is null ? "Planning · 1 to set" : "Planning");
+            }
+
+            yield return ("notes", notes);
+            yield return ("activity", "Activity");
+        }
+    }
+
+    private string StatusLabel => Item.Status switch
+    {
+        WorkStatus.NeedsReview => "Needs review",
+        WorkStatus.Backlog => "Backlog",
+        WorkStatus.Done => "Completed",
+        WorkStatus.OnHold => "On hold",
+        WorkStatus.HandedOff => $"With {Item.HandedTo}",
+        WorkStatus.Fire => "Firefight",
+        _ => "Closed"
+    };
+
+    private bool IsWarm => Item.Status is WorkStatus.NeedsReview or WorkStatus.Fire;
+
+    private IEnumerable<Project> ProjectOptions =>
+        Projects.All.Where(p => p.Status != ProjectStatus.Done || p.Id == draft.ProjectId).OrderBy(p => p.Name);
+
+    private string RepeatHint => draft.Repeat is null
+        ? "Create the next one automatically when this is done"
+        : Repeats.Label(draft.Repeat) + ". The next one is created when you finish this one.";
+
+    private void OnProjectChanged(ChangeEventArgs e)
+    {
+        draft.ProjectId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+    }
+
+    private void ToggleRepeat(bool on)
+    {
+        draft.Repeat = on ? new RepeatRule() : null;
+    }
+
+    private void ToggleDay(DayOfWeek day)
+    {
+        if (draft.Repeat is null)
+        {
+            return;
+        }
+
+        if (!draft.Repeat.Days.Remove(day))
+        {
+            draft.Repeat.Days.Add(day);
+        }
+    }
+
+    private async Task AddNote()
+    {
+        var updated = await Store.AddNoteAsync(Item.Id, newNote);
+
+        if (updated is null)
+        {
+            return;
+        }
+
+        // The note is saved straight away; keep the draft's copy in step.
+        draft.Notes = [.. updated.Notes];
+        draft.Activity = [.. updated.Activity];
+        newNote = "";
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(draft.Title))
+        {
+            formError = IsFire ? "Say briefly what happened." : "Give the task a title.";
+            tab = IsFire ? "fdetails" : "details";
+            return;
+        }
+
+        if (draft.Repeat is not null)
+        {
+            draft.Repeat.Every = Math.Max(1, draft.Repeat.Every);
+        }
+
+        if (!draft.IsBlocked)
+        {
+            draft.BlockedBy = "";
+        }
+        else if (string.IsNullOrWhiteSpace(draft.BlockedBy))
+        {
+            draft.BlockedBy = "not specified";
+        }
+
+        var message = IsFire
+            ? await Store.SaveFireAsync(draft)
+            : await Store.SaveAsync(draft, Projects.NameOf);
+
+        Toasts.Show(message);
+        await OnClose.InvokeAsync();
+    }
+
+    private Task Cancel() => OnClose.InvokeAsync();
+}

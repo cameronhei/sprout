@@ -1,0 +1,38 @@
+.capture {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 22px;
+}
+
+.capture .field {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.log {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 22px;
+    border-color: #E2B98F;
+    background: #FFF8F1;
+}
+
+.log-label {
+    flex: 1 1 100%;
+    font-weight: 600;
+}
+
+.log .field {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.btn-fire,
+.btn-fire:hover {
+    background: #9A4F14;
+    border-color: #9A4F14;
+}

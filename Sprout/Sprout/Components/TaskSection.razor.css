@@ -1,0 +1,52 @@
+﻿.section {
+    padding: 0;
+}
+
+.section-head {
+    margin: 0;
+}
+
+.section-head button {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 60px;
+    padding: 0 22px;
+    border: 0;
+    background: transparent;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 18px;
+    font-weight: 600;
+    color: #1B2A2F;
+    text-align: left;
+    cursor: pointer;
+}
+
+.chev {
+    flex: none;
+    transition: transform 0.15s;
+}
+
+.chev.open { transform: rotate(90deg); }
+
+.dot {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.title { flex: 1 1 auto; }
+
+.section-body { padding: 0 22px 16px; }
+
+.section-body.wide { padding: 0 14px 16px; }
+
+.intro {
+    margin-bottom: 6px;
+    font-size: 14px;
+    color: #56646A;
+}
+
+.section-body.wide .intro { margin: 0 8px 6px; }

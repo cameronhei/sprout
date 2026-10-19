@@ -1,0 +1,365 @@
+﻿@implements IDisposable
+@inject MeetingStore MeetingList
+@inject TaskStore Store
+@inject ToastService Toasts
+
+<div class="overlay">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="mt-heading">
+        <div class="dialog-head">
+            <div class="head-text">
+                <span class="chip purple start">Meeting</span>
+                <h2 id="mt-heading">@(string.IsNullOrWhiteSpace(name) ? "New meeting" : name.Trim())</h2>
+            </div>
+            <button type="button" class="close" aria-label="Close" @onclick="Close">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+        </div>
+
+        <div class="modal-tabs" role="tablist" aria-label="Meeting sections">
+            @foreach (var (key, label) in Tabs)
+            {
+                <button type="button" role="tab" aria-selected="@(tab == key ? "true" : "false")"
+                        class="modal-tab @(tab == key ? "on" : "")" @onclick="() => tab = key">@label</button>
+            }
+        </div>
+
+        <div class="dialog-body">
+            @switch (tab)
+            {
+                case "schedule":
+                    <div class="stack-mid">
+                        <div class="field-wrap">
+                            <label for="mt-name" class="label">Meeting or monthly item</label>
+                            <input id="mt-name" class="field" placeholder="e.g. Monthly Quality Meeting"
+                                   @bind="name" @bind:event="oninput" @bind:after="ClearError" />
+                            @if (error is not null)
+                            {
+                                <div role="alert" class="error">@error</div>
+                            }
+                        </div>
+
+                        <div class="field-wrap">
+                            <label for="mt-type" class="label">Repeats</label>
+                            <select id="mt-type" class="field" @bind="kind" @bind:after="RuleChanged">
+                                <option value="@MeetingRuleKind.Monthly">Monthly, on a set weekday</option>
+                                <option value="@MeetingRuleKind.EveryWeeks">Every few weeks</option>
+                            </select>
+                        </div>
+
+                        <div class="grid2">
+                            @if (kind == MeetingRuleKind.Monthly)
+                            {
+                                <div class="field-wrap">
+                                    <label for="mt-nth" class="label">Which</label>
+                                    <select id="mt-nth" class="field" @bind="nth" @bind:after="RuleChanged">
+                                        <option value="1">1st</option>
+                                        <option value="2">2nd</option>
+                                        <option value="3">3rd</option>
+                                        <option value="4">4th</option>
+                                        <option value="5">Last</option>
+                                    </select>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="field-wrap">
+                                    <label for="mt-every" class="label">Every (weeks)</label>
+                                    <input id="mt-every" class="field" type="number" min="1" max="12"
+                                           @bind="every" @bind:after="EveryChanged" />
+                                </div>
+                            }
+                            <div class="field-wrap">
+                                <label for="mt-wd" class="label">Day</label>
+                                <select id="mt-wd" class="field" @bind="weekday" @bind:after="RuleChanged">
+                                    @foreach (var day in Weekdays)
+                                    {
+                                        <option value="@day">@day</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="field-wrap">
+                            <label for="mt-next" class="label">Next one</label>
+                            <input id="mt-next" class="field" type="date" @bind="next" @bind:after="() => nextTouched = true" />
+                            <span class="small-note">@Meetings.ScheduleText(Rule). Change the date if just this one moves.</span>
+                        </div>
+                    </div>
+                    break;
+
+                case "prep":
+                    var oneOffs = Item is null ? [] : Meetings.CycleTasks(Item, Store.Tasks).Where(t => t.PrepItemId is null).ToList();
+
+                    <div class="stack-tight">
+                        <div class="small-note">
+                            Prep tasks go straight into your backlog. Ones set to repeat are added again for every meeting,
+                            so you only set them up once.
+                        </div>
+
+                        @foreach (var row in prep)
+                        {
+                            <div class="prep-card">
+                                <div class="prep-line">
+                                    <input class="field compact" aria-label="Prep task" placeholder="e.g. Prepare slides" @bind="row.Title" @bind:event="oninput" />
+                                    <button type="button" class="icon-btn" aria-label="Remove prep task" @onclick="() => prep.Remove(row)">
+                                        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                                    </button>
+                                </div>
+                                <div class="prep-options">
+                                    <select class="field compact size" aria-label="Size" @bind="row.Size">
+                                        <option value="@TaskSize.XS">XS · under 30 min</option>
+                                        <option value="@TaskSize.S">S · about 1 h</option>
+                                        <option value="@TaskSize.M">M · about 2.5 h</option>
+                                        <option value="@TaskSize.L">L · about 4 h</option>
+                                        <option value="@TaskSize.XL">XL · 6+ h</option>
+                                    </select>
+                                    <select class="field compact before" aria-label="When it's due" @bind="row.WorkdaysBefore">
+                                        <option value="0">Due the meeting day</option>
+                                        <option value="1">Due the workday before</option>
+                                        <option value="2">Due 2 workdays before</option>
+                                        <option value="3">Due 3 workdays before</option>
+                                        <option value="5">Due a week before</option>
+                                        <option value="10">Due 2 weeks before</option>
+                                    </select>
+                                    <button type="button" class="mini-switch" role="switch" aria-checked="@(row.Recurring ? "true" : "false")"
+                                            @onclick="() => row.Recurring = !row.Recurring">
+                                        <span class="track @(row.Recurring ? "on" : "")"><span class="knob"></span></span>
+                                        @(row.Recurring ? "Every meeting" : "This time only")
+                                    </button>
+                                </div>
+                            </div>
+                        }
+
+                        <button type="button" class="btn btn-small start" @onclick="AddPrepRow">Add prep task</button>
+
+                        @if (oneOffs.Count > 0)
+                        {
+                            <div class="one-offs">
+                                <div class="label">This time only, for @next.ToString("ddd MMM d")</div>
+                                @foreach (var task in oneOffs)
+                                {
+                                    <div class="task-row">
+                                        <button type="button" class="linkish grow-link" @onclick="() => OnOpenTask.InvokeAsync(task)">@task.Title</button>
+                                        <span class="chip">@TaskLabels.State(task, Today)</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    break;
+
+                default:
+                    <div class="stack">
+                        <div class="stack-tight">
+                            <div class="up-label">This meeting · @next.ToString("dddd, MMM d")</div>
+                            <div class="field-wrap tight">
+                                <label for="mt-agenda" class="label">Agenda</label>
+                                <textarea id="mt-agenda" class="field" rows="3" placeholder="Topics to cover, one per line" @bind="agenda"></textarea>
+                                <span class="hint">Shows in your weekly report.</span>
+                            </div>
+                            <div class="field-wrap tight">
+                                <label for="mt-up" class="label">Notes</label>
+                                <textarea id="mt-up" class="field" rows="3" placeholder="Notes during or after the meeting: decisions, follow-ups" @bind="notes"></textarea>
+                                <span class="hint">The day after the meeting, the agenda and notes move to Past meetings under its date.</span>
+                            </div>
+                        </div>
+
+                        <div class="history">
+                            <div class="label">Past meetings</div>
+                            @if (history.Count == 0)
+                            {
+                                <div class="muted small pad">None yet. Notes from each meeting show up here.</div>
+                            }
+                            @for (var i = history.Count - 1; i >= 0; i--)
+                            {
+                                var index = i;
+                                var record = Item!.History[index];
+                                var editingThis = editHistory == index;
+                                var text = history[index];
+                                var when = record.Date.ToString("ddd MMM d");
+
+                                <div class="history-row">
+                                    <div class="history-head">
+                                        <span class="history-when">@when</span>
+                                        <button type="button" class="btn btn-small short" @onclick="() => editHistory = editingThis ? null : index">
+                                            @(editingThis ? "Done" : "Edit")
+                                        </button>
+                                    </div>
+                                    @if (editingThis)
+                                    {
+                                        <textarea class="field small" rows="3" aria-label="Notes from @when" placeholder="Decisions and follow-ups"
+                                                  value="@text" @onchange="e => history[index] = e.Value?.ToString() ?? string.Empty"></textarea>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(record.Agenda))
+                                    {
+                                        <div class="history-agenda"><strong>Agenda:</strong> @record.Agenda.Trim()</div>
+                                    }
+                                    @if (!editingThis)
+                                    {
+                                        <div class="history-text @(string.IsNullOrWhiteSpace(text) ? "empty" : "")">
+                                            @(string.IsNullOrWhiteSpace(text) ? "No notes taken" : text.Trim())
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    break;
+            }
+        </div>
+
+        <div class="dialog-foot">
+            <button type="button" class="btn" @onclick="Close">Cancel</button>
+            <button type="button" class="btn btn-primary" @onclick="Save">Save</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Null for a new meeting.
+    [Parameter] public Meeting? Item { get; set; }
+    [Parameter] public bool StartOnNotes { get; set; }
+    [Parameter] public EventCallback<TaskItem> OnOpenTask { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static readonly DayOfWeek[] Weekdays =
+        [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday];
+
+    private string tab = "schedule";
+    private string name = "";
+    private MeetingRuleKind kind = MeetingRuleKind.Monthly;
+    private int nth = 1;
+    private DayOfWeek weekday = DayOfWeek.Tuesday;
+    private int every = 4;
+    private DateOnly next;
+    private bool nextTouched;
+    private List<PrepDraft> prep = [];
+    private string agenda = "";
+    private string notes = "";
+    private List<string> history = [];
+    private int? editHistory;
+    private string? error;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    private MeetingRule Rule => new()
+    {
+        Kind = kind,
+        Nth = nth,
+        Weekday = weekday,
+        EveryWeeks = Math.Clamp(every, 1, 12)
+    };
+
+    private IEnumerable<(string Key, string Label)> Tabs =>
+    [
+        ("schedule", "Schedule"),
+        ("prep", prep.Count > 0 ? $"Prep ({prep.Count})" : "Prep"),
+        ("notes", "Agenda & notes")
+    ];
+
+    protected override void OnInitialized()
+    {
+        if (Item is null)
+        {
+            next = FirstOnOrAfterToday(Rule);
+            prep = [new PrepDraft { Title = "Prepare", Size = TaskSize.S, WorkdaysBefore = 1, Recurring = true }];
+        }
+        else
+        {
+            name = Item.Name;
+            kind = Item.Rule.Kind;
+            nth = Item.Rule.Nth;
+            weekday = Item.Rule.Weekday;
+            every = Item.Rule.EveryWeeks;
+            next = Item.NextDate;
+            prep = Item.Prep.Select(p => new PrepDraft
+            {
+                Id = p.Id,
+                Title = p.Title,
+                Size = p.Size,
+                WorkdaysBefore = p.WorkdaysBefore,
+                Recurring = true
+            }).ToList();
+            agenda = Item.Agenda;
+            notes = Item.Notes;
+            history = Item.History.Select(h => h.Notes).ToList();
+        }
+
+        tab = StartOnNotes ? "notes" : "schedule";
+        Store.Changed += Refresh;
+    }
+
+    public void Dispose() => Store.Changed -= Refresh;
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private static DateOnly FirstOnOrAfterToday(MeetingRule rule) => Meetings.NextAfter(rule, Today.AddDays(-1));
+
+    private void ClearError() => error = null;
+
+    private void RuleChanged()
+    {
+        if (!nextTouched)
+        {
+            next = FirstOnOrAfterToday(Rule);
+        }
+    }
+
+    private void EveryChanged()
+    {
+        every = Math.Clamp(every, 1, 12);
+        RuleChanged();
+    }
+
+    private void AddPrepRow() => prep.Add(new PrepDraft());
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Save()
+    {
+        var trimmed = name.Trim();
+
+        if (trimmed.Length == 0)
+        {
+            tab = "schedule";
+            error = "Give it a name.";
+            return;
+        }
+
+        var before = Item?.Clone();
+        var tasksBefore = Store.Snapshot();
+
+        var meeting = Item?.Clone() ?? new Meeting();
+        meeting.Name = trimmed;
+        meeting.Rule = Rule;
+        meeting.NextDate = next;
+        meeting.Agenda = agenda.Trim();
+        meeting.Notes = notes.Trim();
+
+        for (var i = 0; i < meeting.History.Count && i < history.Count; i++)
+        {
+            meeting.History[i].Notes = history[i].Trim();
+        }
+
+        var added = await MeetingList.SaveEditAsync(meeting, prep, Store);
+
+        var message = (Item is null ? $"{trimmed} added." : "Saved.")
+            + (added == 0 ? "" : added == 1 ? " 1 prep task is in your backlog." : $" {added} prep tasks are in your backlog.");
+
+        Toasts.Show(message, async () =>
+        {
+            if (before is null)
+            {
+                await MeetingList.RemoveAsync(meeting);
+            }
+            else
+            {
+                await MeetingList.SaveAsync(before);
+            }
+
+            await Store.RestoreAsync(tasksBefore);
+        });
+
+        await Close();
+    }
+}

@@ -1,0 +1,16 @@
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    margin-bottom: 22px;
+    padding: 8px 8px 8px 16px;
+    border-radius: 10px;
+    background: var(--tint);
+    color: var(--deep);
+    font-weight: 500;
+}
+
+.toast-text {
+    flex: 1 1 auto;
+}

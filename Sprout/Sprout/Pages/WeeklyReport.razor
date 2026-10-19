@@ -1,0 +1,536 @@
+﻿@page "/report"
+@implements IDisposable
+@inject ReportService Reporting
+@inject ReportStore Reports
+@inject TaskStore Store
+@inject SettingsStore Settings
+@inject ProjectStore Projects
+@inject MeetingStore MeetingList
+@inject ToastService Toasts
+
+<PageTitle>Weekly Report · Sprout</PageTitle>
+
+@{
+    var ctx = Reporting.Context(report);
+    var doc = ReportBuilder.Build(ctx);
+    var sheetName = ReportBuilder.SheetName(ctx);
+    var prioProjects = ReportBuilder.PriorityProjects(ctx);
+    var looseTasks = ReportBuilder.LooseTasks(ctx);
+    var prioCount = ReportBuilder.PriorityGroups(ctx).Count;
+    var meetItems = ReportBuilder.MeetingItems(ctx);
+    var projItems = ReportBuilder.ProjectItems(ctx);
+    var workbookName = Settings.Current.ReportWorkbookName;
+}
+
+<div class="page">
+    <div class="page-head">
+        <div>
+            <h1>Weekly Report</h1>
+            <div class="intro">
+                Built from your tasks, meetings and projects. Pick what goes in, then copy or export. Only what's in the preview is shared.
+            </div>
+        </div>
+        <div class="head-side">
+            <span class="chip green">@ReportBuilder.WeekLabel(ctx)</span>
+            <span class="small-note">New sheet in your .xlsx: @sheetName</span>
+        </div>
+    </div>
+
+    <div class="layout">
+        <div class="column">
+
+            @* ---- Highlights & asks ---- *@
+            <section class="card part">
+                <ToggleRow Title="Highlights & asks" Large="true"
+                           Hint="Optional section at the top: accomplishments, blockers, decisions needed."
+                           Value="report.ShowHighlights" ValueChanged="SetHighlights" />
+                @if (report.ShowHighlights)
+                {
+                    <div class="stack-tight">
+                        <div class="field-wrap tight">
+                            <div class="label-row">
+                                <label for="hl-acc" class="label">Accomplishments</label>
+                                <button type="button" class="btn btn-small short" @onclick="() => Fill(acc: true)">Fill from completed tasks</button>
+                            </div>
+                            <textarea id="hl-acc" class="field small" rows="3" placeholder="One per line"
+                                      @bind="report.Accomplishments" @bind:after="SaveReport"></textarea>
+                        </div>
+                        <div class="field-wrap tight">
+                            <div class="label-row">
+                                <label for="hl-block" class="label">Blockers</label>
+                                <button type="button" class="btn btn-small short" @onclick="() => Fill(acc: false)">Fill from Waiting on</button>
+                            </div>
+                            <textarea id="hl-block" class="field small" rows="2" placeholder="One per line"
+                                      @bind="report.Blockers" @bind:after="SaveReport"></textarea>
+                        </div>
+                        <div class="field-wrap tight">
+                            <label for="hl-dec" class="label">Decisions needed</label>
+                            <textarea id="hl-dec" class="field small" rows="2" placeholder="What do you need from your boss?"
+                                      @bind="report.Decisions" @bind:after="SaveReport"></textarea>
+                        </div>
+                        @if (report.WhatChangedInReport && !string.IsNullOrWhiteSpace(report.WhatChanged))
+                        {
+                            <div class="small-note">Also includes "What changed" from your Week in review.</div>
+                        }
+                    </div>
+                }
+            </section>
+
+            @* ---- Priorities this week ---- *@
+            <section class="card part">
+                <div class="part-head">
+                    <h2>Priorities this week</h2>
+                    <span class="chip">@(prioCount == 1 ? "1 row" : $"{prioCount} rows")</span>
+                </div>
+                <div class="small-note gap">
+                    Pick anything you're working on. Open a project to pick its tasks. What you type becomes the "Actions" column;
+                    leave it blank to use the due date.
+                </div>
+
+                @foreach (var group in prioProjects)
+                {
+                    var open = IsExpanded(group);
+
+                    <div class="pick-row">
+                        <div class="pick-line">
+                            <button type="button" class="chevron @(open ? "open" : "")" aria-expanded="@(open ? "true" : "false")"
+                                    aria-label="Show tasks in @group.Name" @onclick="() => expanded[group.Project.Id] = !open">
+                                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+                            </button>
+                            <label class="pick">
+                                <input type="checkbox" checked="@group.Included" @onchange="() => ToggleProject(group)" />
+                                <span class="pick-text">
+                                    <span class="strong">@group.Name</span>
+                                    <span class="pick-detail">@group.Detail</span>
+                                </span>
+                            </label>
+                        </div>
+                        @if (group.Included)
+                        {
+                            <input class="field note-field indent-wide" aria-label="Project action for @group.Name" placeholder="Project-level action (optional)"
+                                   value="@group.Note" @onchange="e => SetNote(ReportBuilder.ProjectNoteKey(group.Project.Id), e)" />
+                        }
+                        @if (open)
+                        {
+                            <div class="sub-list">
+                                @foreach (var item in group.Tasks)
+                                {
+                                    <PickTask Item="item" OnToggle="() => ToggleTask(item)"
+                                              OnNote="e => SetNote(item.Task.Id.ToString(), e)" />
+                                }
+                                @if (group.Tasks.Count == 0)
+                                {
+                                    <div class="small-note pad">No open tasks in this project.</div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="label loose">Not in a project</div>
+                @foreach (var item in looseTasks)
+                {
+                    <PickTask Item="item" OnToggle="() => ToggleTask(item)" OnNote="e => SetNote(item.Task.Id.ToString(), e)" />
+                }
+                @if (looseTasks.Count == 0)
+                {
+                    <div class="small-note pad">Nothing open outside your projects.</div>
+                }
+            </section>
+
+            @* ---- Monthly meetings ---- *@
+            <section class="card part">
+                <div class="part-head">
+                    <h2>Monthly meetings</h2>
+                    <span class="chip">@meetItems.Count(i => i.Included) of @meetItems.Count</span>
+                </div>
+                <div class="small-note gap">
+                    Built from your Meetings: when it is, prep progress and the agenda. Meeting notes stay private unless you include them.
+                </div>
+
+                @foreach (var item in meetItems)
+                {
+                    <div class="item-row">
+                        <div class="item-line">
+                            <label class="pick grow">
+                                <input type="checkbox" checked="@item.Included" @onchange="() => ToggleExcluded(report.ExcludedMeetings, item.Meeting.Id)" />
+                                <span class="pick-text">
+                                    <span class="medium">@item.Meeting.Name</span>
+                                    <span class="pick-detail">@item.Detail</span>
+                                </span>
+                            </label>
+                            <button type="button" class="btn btn-small" @onclick="() => OpenMeeting(item.Meeting)">Meeting notes</button>
+                        </div>
+                        @if (item.Included)
+                        {
+                            <ul class="report-lines indent">
+                                @foreach (var line in item.FinalTexts)
+                                {
+                                    <li>@line</li>
+                                }
+                            </ul>
+                            @if (item.MetThisWeek is not null)
+                            {
+                                <label class="met indent">
+                                    <input type="checkbox" checked="@report.MeetingsWithNotes.Contains(item.Meeting.Id)"
+                                           @onchange="() => ToggleExcluded(report.MeetingsWithNotes, item.Meeting.Id)" />
+                                    Include notes from the @ReportBuilder.ShortDay(item.MetThisWeek.Date) meeting
+                                </label>
+                            }
+                            <WordingControls Key="@item.Key" Title="@item.Meeting.Name" Overridden="item.Overridden" Auto="item.FinalTexts"
+                                             Editing="editingKey == item.Key" Report="report"
+                                             OnEditingChanged="k => editingKey = k" OnChanged="SaveReport" />
+                        }
+                    </div>
+                }
+                @if (meetItems.Count == 0)
+                {
+                    <div class="small-note pad">No meetings set up yet. Add them on the Projects &amp; Meetings page.</div>
+                }
+            </section>
+
+            @* ---- Ongoing projects ---- *@
+            <section class="card part">
+                <div class="part-head">
+                    <h2>Ongoing projects</h2>
+                    <span class="chip">@projItems.Count(i => i.Included) of @projItems.Count</span>
+                </div>
+                <div class="small-note gap">
+                    Built from each project's tasks: done this week, what's next, and what's waiting. Add a note for anything else;
+                    it carries over to next week.
+                </div>
+
+                @foreach (var item in projItems)
+                {
+                    <div class="item-row">
+                        <div class="item-line">
+                            <label class="pick grow">
+                                <input type="checkbox" checked="@item.Included" @onchange="() => ToggleExcluded(report.ExcludedProjects, item.Project.Id)" />
+                                <span class="pick-text">
+                                    <span class="medium">@item.Title</span>
+                                    <span class="pick-detail">@item.Detail</span>
+                                </span>
+                            </label>
+                            <button type="button" class="btn btn-small" @onclick="() => OpenProject(item.Project)">Open project</button>
+                        </div>
+                        @if (item.Included)
+                        {
+                            <div class="indent stack-small">
+                                @if (item.Overridden)
+                                {
+                                    <ul class="report-lines">
+                                        @foreach (var line in item.FinalTexts)
+                                        {
+                                            <li>@line</li>
+                                        }
+                                    </ul>
+                                }
+                                else if (item.Lines.Count > 0)
+                                {
+                                    <ul class="report-lines">
+                                        @foreach (var line in item.Lines)
+                                        {
+                                            <li><strong>@line.Kind:</strong> <button type="button" class="linkish line-link" @onclick="() => OpenTask(line.TaskId)">@line.Text</button></li>
+                                        }
+                                    </ul>
+                                }
+                                else
+                                {
+                                    <div class="small-note">No task activity this week.</div>
+                                }
+                                <textarea class="field small" rows="2" aria-label="Note for @item.Title"
+                                          placeholder="Add a project note (optional, carries over each week)"
+                                          value="@item.Project.Note" @onchange="e => SetProjectNote(item.Project, e)"></textarea>
+                                @if (item.NoteMeta.Length > 0)
+                                {
+                                    <span class="hint">@item.NoteMeta</span>
+                                }
+                            </div>
+                            <WordingControls Key="@item.Key" Title="@item.Title" Overridden="item.Overridden" Auto="item.FinalTexts"
+                                             Editing="editingKey == item.Key" Report="report"
+                                             OnEditingChanged="k => editingKey = k" OnChanged="SaveReport" />
+                        }
+                    </div>
+                }
+                @if (projItems.Count == 0)
+                {
+                    <div class="small-note pad">No active projects. Add them on the Projects &amp; Meetings page.</div>
+                }
+            </section>
+        </div>
+
+        @* ---- Preview ---- *@
+        <div class="preview-side">
+            <div class="export">
+                <button type="button" class="btn btn-primary" disabled="@busy" @onclick="() => Copy(doc)">Copy for email</button>
+                @if (canSaveToFile)
+                {
+                    <button type="button" class="btn" disabled="@busy" @onclick="() => AddToExcel(doc, sheetName, false)">Add this week's sheet to Excel</button>
+                }
+                else
+                {
+                    <label class="btn file-btn @(busy ? "disabled" : "")">
+                        Add this week's sheet to Excel
+                        <InputFile class="visually-hidden" accept=".xlsx,.xlsm" OnChange="e => AddToUploaded(e, doc, sheetName)" />
+                    </label>
+                }
+            </div>
+            @if (canSaveToFile && !string.IsNullOrEmpty(workbookName))
+            {
+                <div class="workbook small-note">
+                    Saves to <strong>@workbookName</strong> ·
+                    <button type="button" class="linkish inline-link" disabled="@busy" @onclick="() => AddToExcel(doc, sheetName, true)">Choose a different workbook</button>
+                </div>
+            }
+
+            <article class="preview" aria-label="Report preview">
+                <div class="preview-title">@doc.Title</div>
+                <div class="preview-byline">@doc.Byline</div>
+                @foreach (var table in doc.Tables)
+                {
+                    <table>
+                        <thead>
+                            <tr>
+                                <th scope="col">@table.Heading</th>
+                                <th scope="col">@table.Column</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var group in table.Groups)
+                            {
+                                @for (var i = 0; i < group.Lines.Count; i++)
+                                {
+                                    <tr>
+                                        @if (i == 0)
+                                        {
+                                            <td class="a" rowspan="@group.Lines.Count">@group.Title</td>
+                                        }
+                                        <td class="b">@group.Lines[i]</td>
+                                    </tr>
+                                }
+                            }
+                            @if (table.Groups.Count == 0)
+                            {
+                                <tr><td class="a"></td><td class="b empty-cell">Nothing picked yet</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </article>
+        </div>
+    </div>
+</div>
+
+@if (editingProject is not null)
+{
+    <ProjectDialog Item="editingProject" OnOpenTask="t => editingTask = t" OnClose="() => editingProject = null" />
+}
+
+@if (editingMeeting is not null)
+{
+    <MeetingDialog Item="editingMeeting" StartOnNotes="true" OnOpenTask="t => editingTask = t" OnClose="() => editingMeeting = null" />
+}
+
+@if (editingTask is not null)
+{
+    <TaskDialog Item="editingTask" OnClose="() => editingTask = null" />
+}
+
+@code {
+    private ReportWeek report = default!;
+    private readonly Dictionary<Guid, bool> expanded = new();
+    private string? editingKey;
+    private bool canSaveToFile = true;
+    private bool busy;
+
+    private Project? editingProject;
+    private Meeting? editingMeeting;
+    private TaskItem? editingTask;
+
+    protected override async Task OnInitializedAsync()
+    {
+        report = Reporting.Context().Report;
+
+        Store.Changed += Refresh;
+        Projects.Changed += Refresh;
+        MeetingList.Changed += Refresh;
+        Settings.Changed += Refresh;
+        Reports.Changed += OnReportsChanged;
+
+        canSaveToFile = await Reporting.CanSaveToFileAsync();
+    }
+
+    public void Dispose()
+    {
+        Store.Changed -= Refresh;
+        Projects.Changed -= Refresh;
+        MeetingList.Changed -= Refresh;
+        Settings.Changed -= Refresh;
+        Reports.Changed -= OnReportsChanged;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    // Another page (the This week tab) may have saved this week's report first; use the saved copy.
+    private void OnReportsChanged()
+    {
+        report = Reports.All.FirstOrDefault(r => r.Id == report.Id) ?? report;
+        Refresh();
+    }
+
+    private Task SaveReport() => Reports.SaveAsync(report);
+
+    private bool IsExpanded(PriorityProject group) =>
+        expanded.TryGetValue(group.Project.Id, out var open) ? open : group.Tasks.Any(t => t.Picked);
+
+    private Task SetHighlights(bool on)
+    {
+        report.ShowHighlights = on;
+        return SaveReport();
+    }
+
+    private Task Fill(bool acc)
+    {
+        var ctx = Reporting.Context(report);
+
+        if (acc)
+        {
+            report.Accomplishments = ReportBuilder.FillAccomplishments(ctx);
+        }
+        else
+        {
+            report.Blockers = ReportBuilder.FillBlockers(ctx);
+        }
+
+        return SaveReport();
+    }
+
+    private Task ToggleTask(PriorityTask item)
+    {
+        report.Picks[ReportBuilder.TaskKey(item.Task.Id)] = !item.Picked;
+        return SaveReport();
+    }
+
+    private Task ToggleProject(PriorityProject group)
+    {
+        if (group.Included)
+        {
+            report.Picks[ReportBuilder.ProjectKey(group.Project.Id)] = false;
+            foreach (var item in group.Tasks)
+            {
+                report.Picks[ReportBuilder.TaskKey(item.Task.Id)] = false;
+            }
+        }
+        else
+        {
+            report.Picks[ReportBuilder.ProjectKey(group.Project.Id)] = true;
+            expanded[group.Project.Id] = true;
+        }
+
+        return SaveReport();
+    }
+
+    private Task SetNote(string key, ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString() ?? "";
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            report.ActionNotes.Remove(key);
+        }
+        else
+        {
+            report.ActionNotes[key] = text;
+        }
+
+        return SaveReport();
+    }
+
+    private Task ToggleExcluded(List<Guid> list, Guid id)
+    {
+        if (!list.Remove(id))
+        {
+            list.Add(id);
+        }
+
+        return SaveReport();
+    }
+
+    private async Task SetProjectNote(Project project, ChangeEventArgs e)
+    {
+        var text = (e.Value?.ToString() ?? "").Trim();
+
+        if (text == project.Note)
+        {
+            return;
+        }
+
+        var updated = project.Clone();
+        updated.Note = text;
+        updated.NoteUpdated = DateOnly.FromDateTime(DateTime.Now);
+        await Projects.SaveAsync(updated);
+    }
+
+    private void OpenProject(Project project) => editingProject = project;
+
+    private void OpenMeeting(Meeting meeting) => editingMeeting = meeting;
+
+    private void OpenTask(Guid? id)
+    {
+        var task = id is null ? null : Store.Find(id.Value);
+        if (task is not null)
+        {
+            editingTask = task;
+        }
+    }
+
+    private async Task Copy(ReportDocument doc)
+    {
+        busy = true;
+        try
+        {
+            Toasts.Show(await Reporting.CopyAsync(doc));
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task AddToExcel(ReportDocument doc, string sheetName, bool chooseFile)
+    {
+        busy = true;
+        try
+        {
+            var message = await Reporting.AddToExcelAsync(doc, sheetName, chooseFile);
+            if (message is not null)
+            {
+                Toasts.Show(message);
+            }
+        }
+        catch (Exception)
+        {
+            Toasts.Show("Something went wrong saving the workbook. Your file wasn't changed.");
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task AddToUploaded(InputFileChangeEventArgs e, ReportDocument doc, string sheetName)
+    {
+        busy = true;
+        try
+        {
+            using var stream = e.File.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            using var copy = new MemoryStream();
+            await stream.CopyToAsync(copy);
+            Toasts.Show(await Reporting.AddToUploadedAsync(copy.ToArray(), e.File.Name, doc, sheetName));
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

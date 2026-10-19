@@ -1,0 +1,23 @@
+﻿@* An on/off switch with a title and hint, like the mockup's Firm deadline / Repeat / Blocked rows.
+   Use it with @bind-Value, or with Value + ValueChanged when turning it on needs extra work. *@
+
+<button type="button" class="toggle-row" role="switch" aria-checked="@(Value ? "true" : "false")" @onclick="Toggle">
+    <span class="toggle-text">
+        <span class="toggle-title @(Large ? "large" : "")">@Title</span>
+        @if (!string.IsNullOrEmpty(Hint))
+        {
+            <span class="toggle-hint">@Hint</span>
+        }
+    </span>
+    <span class="track @(Value ? "on" : "")"><span class="knob"></span></span>
+</button>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public bool Value { get; set; }
+    [Parameter] public EventCallback<bool> ValueChanged { get; set; }
+    [Parameter] public bool Large { get; set; }
+
+    private Task Toggle() => ValueChanged.InvokeAsync(!Value);
+}

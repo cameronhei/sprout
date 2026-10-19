@@ -1,0 +1,408 @@
+﻿@page "/settings"
+@implements IDisposable
+@inject SettingsStore SettingsStore
+@inject ToastService Toasts
+@inject BackupService Backups
+
+<PageTitle>Settings · Sprout</PageTitle>
+
+<div class="settings">
+    <h1>Settings</h1>
+
+    <div class="tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" role="tab" class="tab @(tab == "capacity" ? "on" : "")"
+                @onclick='() => tab = "capacity"'>
+            Capacity
+        </button>
+        <button type="button" role="tab" class="tab @(tab == "appearance" ? "on" : "")"
+                @onclick='() => tab = "appearance"'>
+            Appearance
+        </button>
+        <button type="button" role="tab" class="tab @(tab == "data" ? "on" : "")"
+                @onclick='() => tab = "data"'>
+            Data &amp; backup
+        </button>
+    </div>
+
+    @if (tab == "capacity")
+    {
+        <section class="card group">
+            <h2>Workday</h2>
+            <div class="fields">
+                <div class="field-wrap">
+                    <label for="s-hours" class="label">Hours in a workday</label>
+                    <input id="s-hours" class="field" type="number" min="1" max="16" step="0.5"
+                           @bind="draft.HoursPerDay" @bind:after="SaveAsync" />
+                </div>
+                <div class="field-wrap">
+                    <label for="s-buffer" class="label">Buffer per day</label>
+                    <input id="s-buffer" class="field" type="number" min="0" max="12" step="0.5"
+                           @bind="draft.Buffer" @bind:after="SaveAsync" />
+                </div>
+            </div>
+            <p class="note">
+                The buffer covers meetings (including your recurring ones), email and breaks: time you can't
+                plan work into. That leaves <strong>@Capacity.PlannablePerDay(draft) h</strong> of plannable work
+                per day. Meetings aren't subtracted again; only their prep tasks count as planned work.
+            </p>
+        </section>
+
+        <section class="card group">
+            <h2 id="s-weekstart">Week starts on</h2>
+            <div class="seg" role="group" aria-labelledby="s-weekstart">
+                <button type="button" class="seg-btn @(draft.WeekStart == DayOfWeek.Sunday ? "on" : "")"
+                        aria-pressed="@(draft.WeekStart == DayOfWeek.Sunday ? "true" : "false")"
+                        @onclick="() => SetWeekStart(DayOfWeek.Sunday)">
+                    Sunday
+                </button>
+                <button type="button" class="seg-btn @(draft.WeekStart == DayOfWeek.Monday ? "on" : "")"
+                        aria-pressed="@(draft.WeekStart == DayOfWeek.Monday ? "true" : "false")"
+                        @onclick="() => SetWeekStart(DayOfWeek.Monday)">
+                    Monday
+                </button>
+            </div>
+            <p class="note">Workdays are Monday through Friday. This sets where each week begins on the dashboard.</p>
+        </section>
+
+        <section class="card group">
+            <h2>Time off</h2>
+            <p class="note">Holidays, vacation, sick days. These days count as zero capacity.</p>
+
+            @if (draft.TimeOff.Count == 0)
+            {
+                <p class="note">No time off planned.</p>
+            }
+
+            @foreach (var period in draft.TimeOff)
+            {
+                <div class="off-row">
+                    <span class="off-label">@period.Label</span>
+                    <span class="chip off-chip">@Range(period)</span>
+                    <button type="button" class="btn btn-small" @onclick="() => RemoveTimeOff(period)">Remove</button>
+                </div>
+            }
+
+            <div class="add-off">
+                <div class="fields">
+                    <div class="field-wrap">
+                        <label for="to-label" class="label">Label</label>
+                        <input id="to-label" class="field" placeholder="e.g. Vacation" @bind="newLabel" />
+                    </div>
+                    <div class="field-wrap">
+                        <label for="to-start" class="label">First day</label>
+                        <input id="to-start" class="field" type="date" @bind="newStart" />
+                    </div>
+                    <div class="field-wrap">
+                        <label for="to-end" class="label">Last day</label>
+                        <input id="to-end" class="field" type="date" @bind="newEnd" />
+                    </div>
+                </div>
+
+                @if (error is not null)
+                {
+                    <div role="alert" class="error">@error</div>
+                }
+
+                <button type="button" class="btn btn-small btn-primary add-btn" @onclick="AddTimeOff">Add time off</button>
+            </div>
+        </section>
+
+        <section class="card group">
+            <h2>Weekly report</h2>
+            <div class="field-wrap">
+                <label for="s-rname" class="label">Name on the report</label>
+                <input id="s-rname" class="field" @bind="draft.ReportName" @bind:after="SaveAsync" />
+            </div>
+            <p class="note">
+                Shows under "Weekly Touch Base".
+                @if (!string.IsNullOrEmpty(draft.ReportWorkbookName))
+                {
+                    <span> Each week's sheet is saved to <strong>@draft.ReportWorkbookName</strong>.</span>
+                }
+            </p>
+        </section>
+    }
+    else if (tab == "appearance")
+    {
+        <section class="card group">
+            <h2>Appearance</h2>
+            <p class="note">Themes come after the first version. Sprout uses its default green theme for now.</p>
+        </section>
+    }
+    else
+    {
+        <section class="card group">
+            <h2>Your data</h2>
+            <p class="body">
+                Everything in Sprout is stored only in this browser on this computer. Nothing is sent anywhere.
+                Back up regularly in case browser data gets cleared.
+            </p>
+            <p class="note">Last backup: @BackupRules.AgoText(draft.LastBackupAt, DateOnly.FromDateTime(DateTime.Now))</p>
+
+            <div class="button-row">
+                <button type="button" class="btn btn-primary" @onclick="BackUpNow">Back up now</button>
+                <label class="btn file-btn">
+                    Restore from a backup file
+                    <InputFile OnChange="PickRestoreFile" accept=".json,application/json" />
+                </label>
+            </div>
+
+            @if (restoreError is not null)
+            {
+                <div role="alert" class="error">@restoreError</div>
+            }
+
+            @if (pendingRestore is not null)
+            {
+                <div class="confirm" role="alert">
+                    <strong>Replace everything with this backup?</strong>
+                    <span>
+                        Backup from @pendingRestore.CreatedAt.ToString("MMM d, yyyy h:mm tt") with
+                        @pendingRestore.Tasks.Count @(pendingRestore.Tasks.Count == 1 ? "task" : "tasks").
+                        Everything currently in Sprout will be replaced. You can undo right after.
+                    </span>
+                    <div class="button-row">
+                        <button type="button" class="btn btn-small btn-primary" @onclick="ConfirmRestore">Replace with backup</button>
+                        <button type="button" class="btn btn-small" @onclick="() => pendingRestore = null">Cancel</button>
+                    </div>
+                </div>
+            }
+        </section>
+
+        <section class="card group">
+            @if (folderSupported)
+            {
+                <button type="button" class="switch-row" role="switch"
+                        aria-checked="@(draft.AutoBackup ? "true" : "false")"
+                        @onclick="ToggleAuto">
+                    <span class="switch-text">
+                        <span class="switch-title">Automatic backup</span>
+                        <span class="switch-sub">Saves a backup file to a folder you pick, on the schedule below.</span>
+                    </span>
+                    <span class="track @(draft.AutoBackup ? "on" : "")"><span class="knob"></span></span>
+                </button>
+
+                @if (draft.AutoBackup)
+                {
+                    <div class="folder">
+                        <span class="folder-info">
+                            <span class="label">Folder</span>
+                            <span class="folder-name">@(draft.BackupFolderName ?? "No folder chosen yet")</span>
+                            <span class="folder-status @(draft.LastAutoBackupFailed ? "failed" : "")">
+                                @BackupRules.AutoStatus(draft, DateTime.Now)
+                            </span>
+                        </span>
+                        <button type="button" class="btn btn-small" @onclick="ChooseFolder">Choose folder</button>
+                    </div>
+                }
+            }
+            else
+            {
+                <h2>Automatic backup</h2>
+                <p class="note">Automatic backup needs Chrome or Edge. In this browser, use Back up now above.</p>
+            }
+        </section>
+
+        <section class="card group">
+            <h2 id="s-remind">Backup schedule</h2>
+            <div class="seg" role="group" aria-labelledby="s-remind">
+                <button type="button" class="seg-btn @(draft.BackupFrequency == BackupFrequency.Off ? "on" : "")"
+                        @onclick="() => SetFrequency(BackupFrequency.Off)">
+                    Off
+                </button>
+                <button type="button" class="seg-btn @(draft.BackupFrequency == BackupFrequency.Daily ? "on" : "")"
+                        @onclick="() => SetFrequency(BackupFrequency.Daily)">
+                    Daily
+                </button>
+                <button type="button" class="seg-btn @(draft.BackupFrequency == BackupFrequency.Weekly ? "on" : "")"
+                        @onclick="() => SetFrequency(BackupFrequency.Weekly)">
+                    Weekly
+                </button>
+            </div>
+
+            @if (draft.BackupFrequency != BackupFrequency.Off)
+            {
+                <div class="fields">
+                    @if (draft.BackupFrequency == BackupFrequency.Weekly)
+                    {
+                        <div class="field-wrap">
+                            <label for="s-bday" class="label">Day</label>
+                            <select id="s-bday" class="field" @bind="draft.BackupDay" @bind:after="SaveAsync">
+                                <option value="@DayOfWeek.Monday">Monday</option>
+                                <option value="@DayOfWeek.Tuesday">Tuesday</option>
+                                <option value="@DayOfWeek.Wednesday">Wednesday</option>
+                                <option value="@DayOfWeek.Thursday">Thursday</option>
+                                <option value="@DayOfWeek.Friday">Friday</option>
+                                <option value="@DayOfWeek.Saturday">Saturday</option>
+                                <option value="@DayOfWeek.Sunday">Sunday</option>
+                            </select>
+                        </div>
+                    }
+                    <div class="field-wrap">
+                        <label for="s-btime" class="label">Starting at</label>
+                        <select id="s-btime" class="field" @bind="draft.BackupHour" @bind:after="SaveAsync">
+                            <option value="0">Any time</option>
+                            @for (var hour = 12; hour <= 17; hour++)
+                            {
+                                <option value="@hour">@BackupRules.HourLabel(hour)</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+            }
+
+            <p class="note">@BackupRules.ScheduleText(draft)</p>
+        </section>
+    }
+</div>
+
+@code {
+    private string tab = "capacity";
+    private SproutSettings draft = new();
+
+    private string newLabel = "";
+    private DateOnly? newStart;
+    private DateOnly? newEnd;
+    private string? error;
+
+    private BackupFile? pendingRestore;
+    private string? restoreError;
+
+    protected override void OnInitialized()
+    {
+        draft = SettingsStore.Current.Clone();
+        SettingsStore.Changed += OnSettingsChanged;
+    }
+
+    private async Task SaveAsync()
+    {
+        await SettingsStore.SaveAsync(draft.Clone());
+        draft = SettingsStore.Current.Clone();
+    }
+
+    private async Task SetWeekStart(DayOfWeek day)
+    {
+        draft.WeekStart = day;
+        await SaveAsync();
+    }
+
+    private async Task AddTimeOff()
+    {
+        if (newStart is null)
+        {
+            error = "Pick the first day off.";
+            return;
+        }
+
+        var end = newEnd ?? newStart.Value;
+
+        if (end < newStart.Value)
+        {
+            error = "The last day can't be before the first.";
+            return;
+        }
+
+        draft.TimeOff.Add(new TimeOffPeriod
+        {
+            Label = string.IsNullOrWhiteSpace(newLabel) ? "Time off" : newLabel.Trim(),
+            Start = newStart.Value,
+            End = end
+        });
+        draft.TimeOff.Sort((a, b) => a.Start.CompareTo(b.Start));
+
+        newLabel = "";
+        newStart = null;
+        newEnd = null;
+        error = null;
+
+        await SaveAsync();
+        Toasts.Show("Time off added. Capacity is updated.");
+    }
+
+    private async Task RemoveTimeOff(TimeOffPeriod period)
+    {
+        draft.TimeOff.Remove(period);
+        await SaveAsync();
+    }
+
+    private static string Range(TimeOffPeriod period) =>
+        period.Start == period.End
+            ? period.Start.ToString("MMM d, yyyy")
+            : period.Start.ToString("MMM d") + " – " + period.End.ToString("MMM d, yyyy");
+
+    private void OnSettingsChanged()
+    {
+        draft = SettingsStore.Current.Clone();
+        StateHasChanged();
+    }
+
+    public void Dispose() => SettingsStore.Changed -= OnSettingsChanged;
+
+    private async Task SetFrequency(BackupFrequency frequency)
+    {
+        draft.BackupFrequency = frequency;
+        await SaveAsync();
+    }
+
+    private async Task BackUpNow()
+    {
+        Toasts.Show(await Backups.BackUpNowAsync());
+    }
+
+    private bool folderSupported;
+
+    protected override async Task OnInitializedAsync()
+    {
+        folderSupported = await Backups.FolderSupportedAsync();
+    }
+
+    private async Task ToggleAuto()
+    {
+        draft.AutoBackup = !draft.AutoBackup;
+        await SaveAsync();
+    }
+
+    private async Task ChooseFolder()
+    {
+        var result = await Backups.ChooseFolderAsync();
+
+        if (result is true)
+        {
+            Toasts.Show("Folder connected. Sprout backed up just now and will keep doing it on schedule.");
+        }
+        else if (result is false)
+        {
+            Toasts.Show("Sprout couldn't save to that folder. Try choosing it again.");
+        }
+    }
+
+    private async Task PickRestoreFile(InputFileChangeEventArgs e)
+    {
+        restoreError = null;
+        pendingRestore = null;
+
+        using var reader = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 20 * 1024 * 1024));
+        var text = await reader.ReadToEndAsync();
+
+        pendingRestore = BackupService.Read(text);
+
+        if (pendingRestore is null)
+        {
+            restoreError = "That file isn't a Sprout backup. Pick a file named like \"Sprout backup 2026-10-16.json\".";
+        }
+    }
+
+    private async Task ConfirmRestore()
+    {
+        if (pendingRestore is null)
+        {
+            return;
+        }
+
+        var before = Backups.Snapshot();
+        await Backups.RestoreAsync(pendingRestore);
+        pendingRestore = null;
+
+        Toasts.Show("Restored from your backup.", () => Backups.RestoreAsync(before));
+    }
+}

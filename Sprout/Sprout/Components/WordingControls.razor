@@ -1,0 +1,60 @@
+﻿@* "Edit wording" for one report row: custom text for this week only, or back to the automatic lines. *@
+
+<div class="controls">
+    <button type="button" class="btn btn-small short" @onclick="ToggleEditing">@(Editing ? "Done editing" : "Edit wording")</button>
+    @if (Overridden)
+    {
+        <span class="chip blue">Custom wording this week</span>
+        <button type="button" class="btn btn-small short" @onclick="UseAutomatic">Use automatic</button>
+    }
+</div>
+
+@if (Editing && Report.Wording.ContainsKey(Key))
+{
+    <div class="editor">
+        <textarea class="field" rows="4" aria-label="Report wording for @Title"
+                  value="@Report.Wording[Key]" @onchange="OnText"></textarea>
+        <span class="hint">One line per row. Changes only this week's report; your tasks and notes stay as they are.</span>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Key { get; set; } = "";
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public bool Overridden { get; set; }
+    [Parameter] public bool Editing { get; set; }
+    [Parameter] public IReadOnlyList<string> Auto { get; set; } = [];
+    [Parameter, EditorRequired] public ReportWeek Report { get; set; } = default!;
+    [Parameter] public EventCallback<string?> OnEditingChanged { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private async Task ToggleEditing()
+    {
+        if (Editing)
+        {
+            await OnEditingChanged.InvokeAsync(null);
+            return;
+        }
+
+        if (!Report.Wording.ContainsKey(Key))
+        {
+            Report.Wording[Key] = string.Join("\n", Auto);
+            await OnChanged.InvokeAsync();
+        }
+
+        await OnEditingChanged.InvokeAsync(Key);
+    }
+
+    private async Task UseAutomatic()
+    {
+        Report.Wording.Remove(Key);
+        await OnEditingChanged.InvokeAsync(null);
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task OnText(ChangeEventArgs e)
+    {
+        Report.Wording[Key] = e.Value?.ToString() ?? "";
+        return OnChanged.InvokeAsync();
+    }
+}

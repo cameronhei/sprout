@@ -1,0 +1,85 @@
+﻿@implements IDisposable
+@inject SettingsStore Settings
+@inject BackupService Backups
+@inject ToastService Toasts
+
+@if (!snoozed && BackupRules.ShouldRemind(Settings.Current, DateTime.Now))
+{
+    var failed = BackupRules.UsesFolder(Settings.Current) && Settings.Current.LastAutoBackupFailed;
+
+    <div class="reminder" role="region" aria-label="Backup reminder">
+        <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none"
+             stroke="var(--primary-text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M12 15V3" />
+        </svg>
+        <div class="reminder-text">
+            <strong>@BackupRules.ReminderHeadline(Settings.Current, DateTime.Now)</strong>
+            <span>@BackupRules.ReminderDetail(Settings.Current, DateTime.Now)</span>
+        </div>
+        <button type="button" class="btn btn-small btn-primary" @onclick="BackUp">Back up now</button>
+        @if (failed)
+        {
+            <button type="button" class="btn btn-small" @onclick="ChooseFolder">Choose folder again</button>
+        }
+        <button type="button" class="btn btn-small" @onclick="() => snoozed = true">Later</button>
+    </div>
+}
+
+@code {
+    private bool snoozed;
+    private readonly CancellationTokenSource stop = new();
+
+    protected override void OnInitialized()
+    {
+        Settings.Changed += StateHasChanged;
+        _ = RunScheduleAsync();
+    }
+
+    // Checks the backup schedule now and every 15 minutes while Sprout is open.
+    private async Task RunScheduleAsync()
+    {
+        await Backups.RunAutomaticIfDueAsync();
+
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(15));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop.Token))
+            {
+                await Backups.RunAutomaticIfDueAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The component was removed; stop quietly.
+        }
+    }
+
+    private async Task BackUp()
+    {
+        Toasts.Show(await Backups.BackUpNowAsync());
+    }
+
+    private async Task ChooseFolder()
+    {
+        var result = await Backups.ChooseFolderAsync();
+
+        if (result is true)
+        {
+            Toasts.Show("Folder connected. Sprout backed up just now and will keep doing it on schedule.");
+        }
+        else if (result is false)
+        {
+            Toasts.Show("Sprout couldn't save to that folder. Try choosing it again.");
+        }
+    }
+
+    public void Dispose()
+    {
+        stop.Cancel();
+        Settings.Changed -= StateHasChanged;
+    }
+}

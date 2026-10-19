@@ -1,0 +1,101 @@
+.chip.status {
+    align-self: flex-start;
+    background: var(--tint);
+    color: var(--deep);
+}
+
+.chip.status.warm {
+    background: #F6E3CF;
+    color: #7A3F10;
+}
+
+.days {
+    display: flex;
+    overflow: hidden;
+    border: 1px solid #C9D1CC;
+    border-radius: 10px;
+    background: #FFFFFF;
+}
+
+.day-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    border-left: 1px solid #C9D1CC;
+    background: #FFFFFF;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1B2A2F;
+    cursor: pointer;
+}
+
+.day-btn:first-child { border-left: 0; }
+
+.day-btn.on {
+    background: var(--deep);
+    color: #FFFFFF;
+}
+
+.note-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.note {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #F4F6F5;
+}
+
+.note-text {
+    white-space: pre-wrap;
+    font-size: 15px;
+}
+
+.note-when {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #56646A;
+}
+
+.activity {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.activity li {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-top: 8px;
+    border-radius: 50%;
+    background: var(--primary);
+}
+
+.activity-text {
+    flex: 1 1 auto;
+    font-size: 15px;
+}
+
+.activity-when {
+    font-size: 13px;
+    white-space: nowrap;
+    color: #56646A;
+}

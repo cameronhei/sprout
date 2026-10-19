@@ -1,0 +1,144 @@
+﻿@inject TaskStore Store
+@inject ToastService Toasts
+
+<div class="overlay">
+    <div class="dialog compact" role="dialog" aria-modal="true" aria-labelledby="a-heading">
+        <div class="dialog-head">
+            <div class="head-text">
+                <h2 id="a-heading">@(Kind == TaskAction.Defer ? "Defer this task" : "Hand this off")</h2>
+                <div class="subtitle">@Item.Title</div>
+            </div>
+            <button type="button" class="close" aria-label="Close" @onclick="Close">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+        </div>
+
+        <div class="dialog-body">
+            <div class="stack">
+                @if (Kind == TaskAction.Defer)
+                {
+                    <p class="lead">
+                        Currently @CurrentDue. Pick a new due date. It stays in your backlog and drops out of this week's load.
+                    </p>
+                    <div class="field-wrap">
+                        <label for="a-due" class="label">New due date</label>
+                        <input id="a-due" class="field" type="date" @bind="newDue" />
+                    </div>
+                    @if (Item.Impact == ImpactLevel.High)
+                    {
+                        <div class="warn-note">This is high impact. If the deadline is firm, check with whoever set it before moving it.</div>
+                    }
+                }
+                else
+                {
+                    <div class="field-wrap">
+                        <label for="a-to" class="label">Who's taking it?</label>
+                        <input id="a-to" class="field" placeholder="Name" @bind="handTo" @bind:event="oninput" />
+                    </div>
+                    <div class="field-wrap">
+                        <label for="a-note" class="label">Note for them (optional)</label>
+                        <textarea id="a-note" class="field" rows="3" placeholder="Context, files, what done looks like" @bind="handNote"></textarea>
+                    </div>
+                    <div class="field-wrap">
+                        <label for="a-follow" class="label">Follow up on (optional)</label>
+                        <input id="a-follow" class="field" type="date" @bind="followUp" />
+                        <div class="small-note">Sprout reminds you on the dashboard that day.</div>
+                    </div>
+                }
+
+                @if (error is not null)
+                {
+                    <div role="alert" class="error">@error</div>
+                }
+            </div>
+        </div>
+
+        <div class="dialog-foot">
+            <button type="button" class="btn" @onclick="Close">Cancel</button>
+            <button type="button" class="btn btn-primary" @onclick="Confirm">@(Kind == TaskAction.Defer ? "Defer" : "Hand off")</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TaskItem Item { get; set; } = default!;
+    [Parameter] public TaskAction Kind { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private DateOnly? newDue;
+    private string handTo = "";
+    private string handNote = "";
+    private DateOnly? followUp;
+    private string? error;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    private string CurrentDue
+    {
+        get
+        {
+            var label = TaskLabels.Due(Item, Today);
+            return char.ToLower(label[0]) + label[1..];
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        // Suggest next Monday, or a week after the current due date if that's later.
+        var nextMonday = Today.AddDays(7 - ((int)Today.DayOfWeek + 6) % 7);
+        var weekLater = (Item.DueDate ?? Today).AddDays(7);
+        newDue = weekLater > nextMonday ? weekLater : nextMonday;
+    }
+
+    private async Task Confirm()
+    {
+        var before = Item.Clone();
+
+        if (Kind == TaskAction.Defer)
+        {
+            if (newDue is null)
+            {
+                error = "Pick a new due date.";
+                return;
+            }
+
+            var from = Item.DueDate is null ? "no date" : Item.DueDate.Value.ToString("MMM d");
+            var due = newDue.Value;
+
+            await Store.UpdateAsync(Item, t => t.DueDate = due, $"Deferred: due date moved from {from} to {due:MMM d}");
+            Toasts.Show($"Deferred to {due:MMM d}. Your week is recalculated.", () => Store.ReplaceAsync(before));
+        }
+        else
+        {
+            var to = handTo.Trim();
+
+            if (to.Length == 0)
+            {
+                error = "Who are you handing it to?";
+                return;
+            }
+
+            var note = handNote.Trim();
+            var text = $"Handed off to {to}" + (followUp is null ? "" : $", follow up {followUp.Value:MMM d}");
+
+            await Store.UpdateAsync(Item, t =>
+            {
+                t.Status = WorkStatus.HandedOff;
+                t.HandedTo = to;
+                t.HandoffNote = note;
+                t.FollowUpOn = followUp;
+
+                if (note.Length > 0)
+                {
+                    t.Notes.Insert(0, new TaskNote { Text = $"Handoff note for {to}: {note}" });
+                }
+            }, text);
+
+            Toasts.Show(text + ".", () => Store.ReplaceAsync(before));
+        }
+
+        await OnClose.InvokeAsync();
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+}

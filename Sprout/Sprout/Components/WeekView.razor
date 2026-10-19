@@ -1,0 +1,246 @@
+﻿@implements IDisposable
+@inject TaskStore Store
+@inject SettingsStore Settings
+@inject ReportStore Reports
+
+@{
+    var settings = Settings.Current;
+    var weekStart = settings.WeekStart;
+
+    var days = Capacity.DaysOfWeek(Today, weekStart);
+    var workdays = days.Where(Capacity.IsWorkday).ToList();
+    var lastWorkday = workdays[^1];
+    var lastName = lastWorkday.DayOfWeek;
+
+    var perDay = Capacity.PlannablePerDay(settings);
+    var left = Capacity.HoursLeftThisWeek(settings, Store.Tasks, Today);
+    var planned = Capacity.PlannedThisWeek(Store.Tasks, Today, weekStart);
+    var over = planned > left;
+    var percent = left > 0 ? Math.Min(100, (int)Math.Round(planned / left * 100)) : (planned > 0 ? 100 : 0);
+
+    var dueThisWeek = WeekPlan.DueThisWeek(Store.Tasks, Today, weekStart);
+    var overdue = dueThisWeek.Count(t => t.DueDate < Today);
+    var hoursLeftToday = Capacity.HoursLeftToday(settings, Store.Tasks, Today);
+
+    var done = Week.DoneThisWeek(Store.Tasks, Today, weekStart);
+    var doneHours = Math.Round(done.Sum(Recommender.EstimatedHours), 1);
+    var carried = WeekPlan.CarriedForward(Store.Tasks, Today);
+    var comingUp = WeekPlan.ComingUp(Store.Tasks, Today, weekStart);
+
+    var weekFires = Fires.InWeek(Store.Tasks, Today, weekStart);
+    var fireHours = Fires.Hours(weekFires);
+    var recorded = Math.Round(doneHours + fireHours, 1);
+    var reactivePercent = recorded > 0 ? (int)Math.Round(fireHours / recorded * 100) : 0;
+    var byCategory = Fires.ByCategory(weekFires);
+    var report = Reports.For(days[0]);
+}
+
+<div class="week">
+    <section class="card summary">
+        <div class="label">
+            Week of @days[0].ToString("ddd MMM d") · workdays @workdays[0].ToString("MMM d")–@lastWorkday.ToString("MMM d")
+        </div>
+        <div class="headline">
+            @(over ? $"{Math.Round(planned - left, 1)} h more planned than you have left"
+                   : $"{Math.Round(left - planned, 1)} h of breathing room this week")
+        </div>
+        <div class="bar" aria-hidden="true">
+            <div class="fill @(over ? "over" : "")" style="width: @(percent)%"></div>
+        </div>
+        <p class="note">
+            @(over ? "The plan is bigger than the week. That’s a workload problem, not a you problem."
+                   : "Your plan fits inside the time you actually have left.")
+        </p>
+
+        <button type="button" class="linkish math-toggle"
+                aria-expanded="@(showMath ? "true" : "false")"
+                @onclick="() => showMath = !showMath">
+            @(showMath ? "Hide how these numbers work" : "How these numbers work")
+        </button>
+
+        @if (showMath)
+        {
+            <ul class="math">
+                <li>Plannable per day = @settings.HoursPerDay h workday − @settings.Buffer h buffer (meetings, email, breaks) = @perDay h.</li>
+                <li>Left this week = plannable hours from today through @lastName, minus logged firefight time on those days = @left h.</li>
+                <li>Planned = estimated sizes (XS 0.5, S 1, M 2.5, L 4, XL 6 h) of tasks due by @lastName, overdue included = @planned h. Tasks without a size count as Small.</li>
+                <li>Done and planned hours are estimates from sizes, not time tracked. Fire hours are what you logged.</li>
+            </ul>
+        }
+    </section>
+
+    <div class="days">
+        @foreach (var day in workdays)
+        {
+            var off = Capacity.TimeOffOn(settings, day);
+            var isPast = day < Today;
+            var isToday = day == Today;
+
+            <div class="day @(isToday ? "today" : "") @(isPast ? "past" : "") @(off is not null ? "off" : "")">
+                <div class="day-head">
+                    <span class="day-name">@day.ToString("ddd")</span>
+                    <span class="day-date">@day.ToString("MMM d")</span>
+                </div>
+
+                @if (off is not null)
+                {
+                    <span class="chip off-chip">@off.Label</span>
+                }
+                else
+                {
+                    <div class="day-rows">
+                        <div><span>Plannable</span><strong>@Capacity.AvailableOn(settings, day) h</strong></div>
+                        <div><span>Fires (logged)</span><strong class="fire">@Fires.HoursOn(Store.Tasks, day) h</strong></div>
+                        <div><span>Done (est.)</span><strong class="done">@Capacity.DoneHoursOn(Store.Tasks, day) h</strong></div>
+                    </div>
+                }
+
+                @if (isToday)
+                {
+                    <span class="day-tag">Today</span>
+                }
+                else if (isPast)
+                {
+                    <span class="day-tag">Done</span>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="stats">
+        <section class="card stat" style="--accent: var(--a1)">
+            <div class="label">Left this week</div>
+            <div class="big">@left h</div>
+            <div class="detail">Plannable hours today through @lastName, after your daily buffer and logged fires</div>
+        </section>
+
+        <section class="card stat" style="--accent: var(--a2)">
+            <div class="label">Planned (estimated)</div>
+            <div class="big">@planned h</div>
+            <div class="detail">
+                Estimated from sizes: @dueThisWeek.Count @Plural(dueThisWeek.Count, "task") due by @lastName@(overdue > 0 ? $", including {overdue} overdue" : "")
+            </div>
+        </section>
+
+        <section class="card stat" style="--accent: #B8641F">
+            <div class="label">Fires (logged)</div>
+            <div class="big fire">@fireHours h</div>
+            <div class="detail">
+                @(weekFires.Count > 0
+                    ? $"Time you logged on {weekFires.Count} {Plural(weekFires.Count, "interruption")} since {days[0].DayOfWeek}"
+                    : "None logged this week")
+            </div>
+        </section>
+    </div>
+
+    @if (over)
+    {
+        <section class="card tradeoffs">
+            <div class="label warn">Suggested trade-offs</div>
+            <p class="note">These matter least this week. Moving one isn't failing; it's planning.</p>
+
+            @foreach (var task in WeekPlan.TradeOffs(Store.Tasks, Today, weekStart, hoursLeftToday))
+            {
+                <div class="row">
+                    <button type="button" class="linkish grow" @onclick="() => editing = task">@task.Title</button>
+                    <span class="chip">@TaskLabels.Size(task)</span>
+                    <span class="chip">@TaskLabels.Due(task, Today)</span>
+                    <button type="button" class="btn btn-small" @onclick="() => StartAction(task, TaskAction.Defer)">Defer…</button>
+                    <button type="button" class="btn btn-small" @onclick="() => StartAction(task, TaskAction.HandOff)">Hand off…</button>
+                </div>
+            }
+        </section>
+    }
+    else
+    {
+        <section class="card fits">This week fits. Anything new that shows up is a choice, not an obligation.</section>
+    }
+
+    <section class="card review">
+        <div class="label">Week in review</div>
+        <ul>
+            <li>Planned work: @done.Count @Plural(done.Count, "task") done, about @doneHours h (estimated from sizes).</li>
+            <li>
+                Reactive work: @fireHours h logged across @weekFires.Count @Plural(weekFires.Count, "interruption")@(recorded > 0
+                    ? $", {reactivePercent}% of recorded time (estimated done + logged fires)."
+                    : ".")
+            </li>
+            <li>@(byCategory == "" ? "No interruptions logged this week." : $"Interruptions by type: {byCategory}.")</li>
+            <li>
+                @(carried > 0
+                    ? $"Carried forward: {carried} {Plural(carried, "task")} {(carried == 1 ? "is" : "are")} past due and still open."
+                    : "Nothing carried forward.")
+            </li>
+        </ul>
+
+        <div class="reflect">
+            <label for="reflect" class="label">What changed this week? (optional)</label>
+            <textarea id="reflect" class="field" rows="2"
+                      placeholder="e.g. Two production holds pushed the SOP update to next week"
+                      @bind="report.WhatChanged" @bind:after="() => Reports.SaveAsync(report)"></textarea>
+            <label class="check">
+                <input type="checkbox" @bind="report.WhatChangedInReport" @bind:after="() => Reports.SaveAsync(report)" />
+                Add it to the weekly report highlights
+            </label>
+        </div>
+    </section>
+
+    <section class="card coming">
+        <div class="label">Coming up after this week</div>
+
+        @if (comingUp.Count == 0)
+        {
+            <p class="note">Nothing scheduled after this week yet.</p>
+        }
+
+        @foreach (var task in comingUp)
+        {
+            <div class="row">
+                <button type="button" class="linkish grow" @onclick="() => editing = task">@task.Title</button>
+                <span class="chip">@TaskLabels.Size(task)</span>
+                <span class="chip">@TaskLabels.Due(task, Today)</span>
+            </div>
+        }
+    </section>
+</div>
+
+@if (editing is not null)
+{
+    <TaskDialog Item="editing" OnClose="() => editing = null" />
+}
+
+@if (acting is not null)
+{
+    <ActionDialog Item="acting" Kind="actionKind" OnClose="() => acting = null" />
+}
+
+@code {
+    private TaskItem? editing;
+    private TaskItem? acting;
+    private TaskAction actionKind;
+    private bool showMath;
+
+    private void StartAction(TaskItem task, TaskAction kind)
+    {
+        acting = task;
+        actionKind = kind;
+    }
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    private static string Plural(int count, string word) => count == 1 ? word : word + "s";
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += StateHasChanged;
+        Settings.Changed += StateHasChanged;
+        Reports.Changed += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        Store.Changed -= StateHasChanged;
+        Settings.Changed -= StateHasChanged;
+        Reports.Changed -= StateHasChanged;
+    }
+}

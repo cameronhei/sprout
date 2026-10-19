@@ -1,0 +1,253 @@
+﻿@implements IDisposable
+@inject ProjectStore Projects
+@inject TaskStore Store
+@inject SettingsStore Settings
+@inject ToastService Toasts
+
+@{
+    var linked = Item is null ? [] : Store.Tasks.Where(t => t.ProjectId == Item.Id).ToList();
+    var lines = Item is null ? [] : ProjectLines.For(Item.Id, Store.Tasks, Today, Settings.Current.WeekStart);
+    var openCount = Item is null ? 0 : ProjectLines.OpenCount(Item.Id, Store.Tasks);
+}
+
+<div class="overlay">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="p-heading">
+        <div class="dialog-head">
+            <div class="head-text">
+                <span class="chip green start">Project</span>
+                <h2 id="p-heading">@(string.IsNullOrWhiteSpace(name) ? "New project" : name.Trim())</h2>
+            </div>
+            <button type="button" class="close" aria-label="Close" @onclick="Close">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+        </div>
+
+        <div class="modal-tabs" role="tablist" aria-label="Project sections">
+            <button type="button" role="tab" aria-selected="@(tab == "update" ? "true" : "false")"
+                    class="modal-tab @(tab == "update" ? "on" : "")" @onclick="@(() => tab = "update")">Details</button>
+            <button type="button" role="tab" aria-selected="@(tab == "tasks" ? "true" : "false")"
+                    class="modal-tab @(tab == "tasks" ? "on" : "")" @onclick="@(() => tab = "tasks")">
+                @(linked.Count > 0 ? $"Tasks ({linked.Count})" : "Tasks")
+            </button>
+        </div>
+
+        <div class="dialog-body">
+            @if (tab == "update")
+            {
+                <div class="stack grow">
+                    <div class="name-row">
+                        <div class="field-wrap">
+                            <label for="p-name" class="label">Project name</label>
+                            <input id="p-name" class="field" @bind="name" @bind:event="oninput" @bind:after="ClearError" />
+                        </div>
+                        <div class="field-wrap">
+                            <label for="p-status" class="label">Status</label>
+                            <select id="p-status" class="field" @bind="status">
+                                <option value="@ProjectStatus.Active">Active</option>
+                                <option value="@ProjectStatus.OnHold">On hold</option>
+                                <option value="@ProjectStatus.Done">Finished</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    @if (error is not null)
+                    {
+                        <div role="alert" class="error">@error</div>
+                    }
+
+                    @if (Item is not null && status == ProjectStatus.Done && openCount > 0)
+                    {
+                        <div class="warn-note">
+                            @(openCount == 1 ? "1 open task stays" : $"{openCount} open tasks stay") in your backlog when you finish this project.
+                            Finish, hand off or unlink them separately.
+                        </div>
+                    }
+
+                    <div class="panel tight">
+                        <div class="label">This week, from your tasks</div>
+                        @if (lines.Count > 0)
+                        {
+                            <ul class="lines">
+                                @foreach (var line in lines)
+                                {
+                                    <li><strong>@line.Kind:</strong> <button type="button" class="linkish line-link" @onclick="() => OpenTask(line.TaskId)">@line.Text</button></li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <div class="muted small">Nothing yet. Link tasks to this project and they'll show up here.</div>
+                        }
+                    </div>
+
+                    <div class="field-wrap grow">
+                        <label for="p-note" class="label">Note for your report</label>
+                        <textarea id="p-note" class="field grow" placeholder="Context the tasks don't cover, e.g. who's involved or why it's on hold"
+                                  @bind="note" @bind:event="oninput"></textarea>
+                        <span class="hint">Shows under this project in the weekly report and carries over until you change it.</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="stack-tight">
+                    <div class="add-row">
+                        <label for="p-task" class="visually-hidden">New task for this project</label>
+                        <input id="p-task" class="field" placeholder="Add a task to this project"
+                               @bind="newTask" @bind:event="oninput" @onkeydown="AddOnEnter" />
+                        <button type="button" class="btn" @onclick="AddTask">Add</button>
+                    </div>
+                    <div class="small-note">New tasks go to Needs review, already linked to this project.</div>
+
+                    @if (error is not null)
+                    {
+                        <div role="alert" class="error">@error</div>
+                    }
+
+                    @if (linked.Count == 0)
+                    {
+                        <div class="muted">No tasks linked yet. You can also link a task from its Planning tab.</div>
+                    }
+
+                    @foreach (var task in linked)
+                    {
+                        <div class="task-row">
+                            <button type="button" class="linkish grow-link" @onclick="() => OnOpenTask.InvokeAsync(task)">@task.Title</button>
+                            <span class="chip">@TaskLabels.State(task, Today)</span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="dialog-foot">
+            <button type="button" class="btn" @onclick="Close">Cancel</button>
+            <button type="button" class="btn btn-primary" @onclick="Save">Save</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Null for a new project.
+    [Parameter] public Project? Item { get; set; }
+    [Parameter] public EventCallback<TaskItem> OnOpenTask { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string tab = "update";
+    private string name = "";
+    private ProjectStatus status = ProjectStatus.Active;
+    private string note = "";
+    private string newTask = "";
+    private string? error;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    protected override void OnInitialized()
+    {
+        if (Item is not null)
+        {
+            name = Item.Name;
+            status = Item.Status;
+            note = Item.Note;
+        }
+
+        Store.Changed += Refresh;
+    }
+
+    public void Dispose() => Store.Changed -= Refresh;
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void ClearError() => error = null;
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private Task OpenTask(Guid id)
+    {
+        var task = Store.Find(id);
+        return task is null ? Task.CompletedTask : OnOpenTask.InvokeAsync(task);
+    }
+
+    private async Task AddOnEnter(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddTask();
+        }
+    }
+
+    private async Task AddTask()
+    {
+        var title = newTask.Trim();
+
+        if (title.Length == 0)
+        {
+            return;
+        }
+
+        if (Item is null)
+        {
+            error = "Save the project first, then add tasks.";
+            return;
+        }
+
+        var task = new TaskItem { Title = title, ProjectId = Item.Id };
+        task.Log($"Captured from project {Item.Name}");
+        await Store.AddAsync(task);
+
+        newTask = "";
+        error = null;
+    }
+
+    private async Task Save()
+    {
+        var trimmed = name.Trim();
+
+        if (trimmed.Length == 0)
+        {
+            tab = "update";
+            error = "Give the project a name.";
+            return;
+        }
+
+        var trimmedNote = note.Trim();
+
+        if (Item is null)
+        {
+            var created = new Project
+            {
+                Name = trimmed,
+                Status = status,
+                Note = trimmedNote,
+                NoteUpdated = trimmedNote.Length > 0 ? Today : null
+            };
+
+            await Projects.SaveAsync(created);
+            Toasts.Show("Project added. Link tasks to it and its weekly update builds itself.",
+                () => Projects.RemoveAsync(created));
+            await Close();
+            return;
+        }
+
+        var before = Item.Clone();
+        var updated = Item.Clone();
+        updated.Name = trimmed;
+        updated.Status = status;
+
+        if (trimmedNote != (Item.Note ?? ""))
+        {
+            updated.Note = trimmedNote;
+            updated.NoteUpdated = Today;
+        }
+
+        await Projects.SaveAsync(updated);
+
+        var openCount = ProjectLines.OpenCount(Item.Id, Store.Tasks);
+        var message = status == ProjectStatus.Done && openCount > 0
+            ? $"Project finished. Its {(openCount == 1 ? "1 open task stays" : $"{openCount} open tasks stay")} in your backlog."
+            : "Project saved.";
+
+        Toasts.Show(message, () => Projects.SaveAsync(before));
+        await Close();
+    }
+}

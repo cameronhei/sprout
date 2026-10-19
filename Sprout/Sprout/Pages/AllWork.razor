@@ -1,0 +1,319 @@
+﻿@page "/work"
+@implements IDisposable
+@inject TaskStore Store
+@inject SettingsStore Settings
+@inject ProjectStore Projects
+@inject MeetingStore MeetingList
+@inject ToastService Toasts
+
+<PageTitle>All Work · Sprout</PageTitle>
+
+@{
+    var settings = Settings.Current;
+    var hoursLeft = Capacity.HoursLeftToday(settings, Store.Tasks, Today);
+
+    var review = Store.Tasks.Where(t => t.Status == WorkStatus.NeedsReview).ToList();
+
+    var backlogTasks = Store.Tasks.Where(t => t.Status == WorkStatus.Backlog).ToList();
+    var order = BacklogOrder.Resolve(backlogTasks, settings.BacklogOrder, Today);
+    var backlog = order.Select(id => backlogTasks.First(t => t.Id == id)).ToList();
+    var ranked = Recommender.Rank(Store.Tasks, Today, hoursLeft, settings.BacklogOrder);
+
+    var fires = Store.Tasks.Where(t => t.Status == WorkStatus.Fire)
+                           .OrderByDescending(t => t.FireDate).ThenByDescending(t => t.CreatedAt).ToList();
+    var weekFireHours = Fires.Hours(Fires.InWeek(Store.Tasks, Today, settings.WeekStart));
+
+    var waiting = Store.Tasks.Where(t => (t.Status == WorkStatus.Backlog && t.IsBlocked) || t.Status == WorkStatus.HandedOff).ToList();
+    var followUpNow = waiting.Any(FollowUpDue);
+
+    var onHold = Store.Tasks.Where(t => t.Status == WorkStatus.OnHold).ToList();
+    var completed = Store.Tasks.Where(t => t.Status == WorkStatus.Done).OrderByDescending(t => t.CompletedAt).ToList();
+}
+
+<div class="page">
+    <h1>All Work</h1>
+
+    <TaskSection Title="Needs review" Count="@review.Count.ToString()" CountClass="@(review.Count > 0 ? "warm" : "")"
+                 Dot="var(--a2)"
+                 Intro="Quick adds land here and can already be recommended (as Small, Medium impact, no due date). Add a size when you have a minute and they move to your backlog.">
+        @if (review.Count == 0)
+        {
+            <div class="empty-row">All caught up.</div>
+        }
+        @foreach (var task in review)
+        {
+            <div class="row">
+                <button type="button" class="linkish grow" @onclick="() => Open(task)">@task.Title</button>
+                <span class="chip warm">Needs size</span>
+                <button type="button" class="btn btn-small btn-primary" @onclick='() => Open(task, "planning")'>Review</button>
+            </div>
+        }
+    </TaskSection>
+
+    <TaskSection Title="Backlog" Count="@backlog.Count.ToString()" Dot="var(--a1)" Wide="true"
+                 Intro="Your priority order. Drag to reorder: higher on your list counts for more, alongside deadline and impact. A chip appears when Sprout would rank a task very differently.">
+        @if (backlog.Count == 0)
+        {
+            <div class="empty-row padded">Nothing in your backlog yet. Size a task in Needs review and it moves here.</div>
+        }
+        @for (var i = 0; i < backlog.Count; i++)
+        {
+            var task = backlog[i];
+            var position = i + 1;
+            var suggested = ranked.IndexOf(task) + 1;
+            var project = Projects.Find(task.ProjectId);
+            var meeting = MeetingList.Find(task.MeetingId);
+
+            <div class="row drag @(dragId == task.Id ? "dragging" : "") @(IsDropTarget(task) ? "target" : "")"
+                 draggable="true"
+                 @ondragstart="() => dragId = task.Id"
+                 @ondragover="() => overId = task.Id" @ondragover:preventDefault
+                 @ondrop="() => DropOn(task, order)" @ondrop:preventDefault
+                 @ondragend="EndDrag">
+                <span class="grip" aria-hidden="true" title="Drag to reorder">
+                    <svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor">
+                        <circle cx="5" cy="4" r="1.6" /><circle cx="11" cy="4" r="1.6" />
+                        <circle cx="5" cy="10" r="1.6" /><circle cx="11" cy="10" r="1.6" />
+                        <circle cx="5" cy="16" r="1.6" /><circle cx="11" cy="16" r="1.6" />
+                    </svg>
+                </span>
+                <button type="button" class="linkish grow-220" @onclick="() => Open(task)">@task.Title</button>
+                @if (project is not null)
+                {
+                    <span class="chip green">@project.Name</span>
+                }
+                @if (meeting is not null)
+                {
+                    <span class="chip purple">Prep · @meeting.Name</span>
+                }
+                @if (suggested > 0 && Math.Abs(suggested - position) >= 3)
+                {
+                    <span class="chip green">Sprout suggests #@suggested</span>
+                }
+                <span class="chip">@TaskLabels.Size(task)</span>
+                <span class="chip @(task.IsFirm ? "warm" : "")">@DueChip(task)</span>
+                @if (task.IsBlocked)
+                {
+                    <span class="chip warm">Blocked: @task.BlockedBy</span>
+                }
+                @if (task.Repeat is not null)
+                {
+                    <span class="chip blue">@Repeats.Label(task.Repeat)</span>
+                }
+                <button type="button" class="btn btn-small" @onclick="() => PutOnHold(task)">Put on hold</button>
+                <button type="button" class="btn btn-small" @onclick="() => MarkDone(task)">Done</button>
+            </div>
+        }
+    </TaskSection>
+
+    <TaskSection Title="Firefights" Count="@FiresSummary(fires.Count, weekFireHours)" CountClass="warm" Dot="#B8641F"
+                 Intro="Times you got pulled in. Note who asked, why you were needed and how long it took, so you can explain it later.">
+        @if (fires.Count == 0)
+        {
+            <div class="empty-row">No fires logged. Enjoy it.</div>
+        }
+        @foreach (var fire in fires)
+        {
+            <div class="row">
+                <button type="button" class="linkish grow" @onclick="() => Open(fire)">@fire.Title</button>
+                @if (fire.RequestedBy != "")
+                {
+                    <span class="chip">Pulled in by @fire.RequestedBy</span>
+                }
+                @if (fire.Minutes is not null)
+                {
+                    <span class="chip warm">@Fires.FormatMinutes(fire.Minutes.Value)</span>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-small" @onclick='() => Open(fire, "foutcome")'>Add time &amp; details</button>
+                }
+                <span class="when">@Fires.WhenLabel(fire.FireDate, Today)</span>
+            </div>
+        }
+    </TaskSection>
+
+    <TaskSection Title="Waiting on" Count="@waiting.Count.ToString()" CountClass="@(followUpNow ? "warm" : "")" Dot="#23406A"
+                 Intro="Everything you're waiting on someone else for: blocked tasks and work you handed off.">
+        @if (waiting.Count == 0)
+        {
+            <div class="empty-row">Not waiting on anyone.</div>
+        }
+        @foreach (var task in waiting)
+        {
+            var handed = task.Status == WorkStatus.HandedOff;
+
+            <div class="row">
+                <button type="button" class="linkish grow-220" @onclick="() => Open(task)">@task.Title</button>
+                <span class="chip blue">@(handed ? $"With {task.HandedTo}" : $"Waiting on {task.BlockedBy}")</span>
+                <span class="chip @(FollowUpDue(task) ? "warm" : "")">@FollowText(task)</span>
+                @if (handed)
+                {
+                    <button type="button" class="btn btn-small" @onclick="() => TakeBack(task)">Take it back</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-small" @onclick="() => Unblock(task)">Unblock</button>
+                }
+            </div>
+        }
+    </TaskSection>
+
+    <TaskSection Title="On hold" Count="@onHold.Count.ToString()" Dot="var(--a3)" StartOpen="false">
+        @if (onHold.Count == 0)
+        {
+            <div class="empty-row">Nothing on hold.</div>
+        }
+        @foreach (var task in onHold)
+        {
+            <div class="row">
+                <button type="button" class="linkish grow muted" @onclick="() => Open(task)">@task.Title</button>
+                <span class="chip">On hold</span>
+                <button type="button" class="btn btn-small" @onclick="() => BringBack(task)">Bring back</button>
+            </div>
+        }
+    </TaskSection>
+
+    <TaskSection Title="Completed" Count="@completed.Count.ToString()" StartOpen="false">
+        @if (completed.Count == 0)
+        {
+            <div class="empty-row">Finished tasks show up here.</div>
+        }
+        @foreach (var task in completed)
+        {
+            <div class="row">
+                <button type="button" class="linkish grow muted" @onclick="() => Open(task)">@task.Title</button>
+                <span class="chip green">Done @Fires.WhenLabel(task.CompletedAt is null ? null : DateOnly.FromDateTime(task.CompletedAt.Value), Today)</span>
+            </div>
+        }
+    </TaskSection>
+</div>
+
+@if (editing is not null)
+{
+    <TaskDialog Item="editing" InitialTab="@editingTab" OnClose="() => editing = null" />
+}
+
+@code {
+    private TaskItem? editing;
+    private string? editingTab;
+    private Guid? dragId;
+    private Guid? overId;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    private void Open(TaskItem task, string? tab = null)
+    {
+        editing = task;
+        editingTab = tab;
+    }
+
+    private string DueChip(TaskItem task) => (task.IsFirm ? "Firm · " : "") + TaskLabels.Due(task, Today);
+
+    private static string FiresSummary(int count, double weekHours) =>
+        count + (weekHours > 0 ? $" · {weekHours} h this week" : "");
+
+    private static bool FollowUpDue(TaskItem task) =>
+        task.Status == WorkStatus.HandedOff && task.FollowUpOn is not null && task.FollowUpOn <= Today;
+
+    private static string FollowText(TaskItem task)
+    {
+        if (task.Status != WorkStatus.HandedOff)
+        {
+            return "Still yours";
+        }
+
+        if (task.FollowUpOn is null)
+        {
+            return "Theirs now, no follow-up";
+        }
+
+        return FollowUpDue(task) ? "Follow up now" : $"You follow up {task.FollowUpOn.Value:MMM d}";
+    }
+
+    private bool IsDropTarget(TaskItem task) => overId == task.Id && dragId is not null && dragId != task.Id;
+
+    private void EndDrag()
+    {
+        dragId = null;
+        overId = null;
+    }
+
+    private async Task DropOn(TaskItem target, List<Guid> order)
+    {
+        var dragged = dragId;
+        EndDrag();
+
+        if (dragged is null || dragged == target.Id)
+        {
+            return;
+        }
+
+        var from = order.IndexOf(dragged.Value);
+        var newOrder = BacklogOrder.Move(order, dragged.Value, target.Id);
+        var to = newOrder.IndexOf(dragged.Value);
+
+        var updated = Settings.Current.Clone();
+        updated.BacklogOrder = newOrder;
+        await Settings.SaveAsync(updated);
+
+        var task = Store.Find(dragged.Value);
+        if (task is not null)
+        {
+            await Store.UpdateAsync(task, _ => { }, $"Moved from #{from + 1} to #{to + 1} in your backlog");
+        }
+
+        Toasts.Show("Order saved. Recommendation recalculated.");
+    }
+
+    private async Task MarkDone(TaskItem task)
+    {
+        var before = Store.Snapshot();
+        var next = await Store.CompleteAsync(task);
+        var message = "Done. Nice work." + (next?.DueDate is null ? "" : $" The next one is due {next.DueDate.Value:MMM d}.");
+
+        Toasts.Show(message, () => Store.RestoreAsync(before));
+    }
+
+    private async Task PutOnHold(TaskItem task)
+    {
+        var before = task.Clone();
+        await Store.UpdateAsync(task, t => t.Status = WorkStatus.OnHold, "Put on hold");
+        Toasts.Show("On hold. It won't count against this week.", () => Store.ReplaceAsync(before));
+    }
+
+    private async Task BringBack(TaskItem task)
+    {
+        var before = task.Clone();
+        await Store.UpdateAsync(task, t => t.Status = t.Size is null ? WorkStatus.NeedsReview : WorkStatus.Backlog, "Brought back to backlog");
+        Toasts.Show("Back in your backlog.", () => Store.ReplaceAsync(before));
+    }
+
+    private async Task TakeBack(TaskItem task)
+    {
+        var before = task.Clone();
+        await Store.UpdateAsync(task, t => t.Status = t.Size is null ? WorkStatus.NeedsReview : WorkStatus.Backlog, $"Taken back from {task.HandedTo}");
+        Toasts.Show("Back in your backlog.", () => Store.ReplaceAsync(before));
+    }
+
+    private async Task Unblock(TaskItem task)
+    {
+        var before = task.Clone();
+        await Store.UpdateAsync(task, t => { t.IsBlocked = false; t.BlockedBy = ""; }, "Unblocked");
+        Toasts.Show("Unblocked. It can be recommended again.", () => Store.ReplaceAsync(before));
+    }
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += StateHasChanged;
+        Settings.Changed += StateHasChanged;
+        Projects.Changed += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        Store.Changed -= StateHasChanged;
+        Settings.Changed -= StateHasChanged;
+        Projects.Changed -= StateHasChanged;
+    }
+}

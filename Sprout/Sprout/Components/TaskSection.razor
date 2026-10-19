@@ -1,0 +1,42 @@
+﻿@* A collapsible card section, like the mockup's All Work sections.
+   Whatever you put between <TaskSection> and </TaskSection> becomes ChildContent. *@
+
+<section class="card section">
+    <h2 class="section-head">
+        <button type="button" aria-expanded="@(open ? "true" : "false")" @onclick="() => open = !open">
+            <svg class="chev @(open ? "open" : "")" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 6l6 6-6 6" />
+            </svg>
+            <span class="dot" aria-hidden="true" style="background: @Dot"></span>
+            <span class="title">@Title</span>
+            <span class="chip @CountClass">@Count</span>
+        </button>
+    </h2>
+
+    @if (open)
+    {
+        <div class="section-body @(Wide ? "wide" : "")">
+            @if (!string.IsNullOrEmpty(Intro))
+            {
+                <div class="intro">@Intro</div>
+            }
+            @ChildContent
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string Count { get; set; } = "";
+    [Parameter] public string CountClass { get; set; } = "";
+    [Parameter] public string Dot { get; set; } = "var(--primary)";
+    [Parameter] public string? Intro { get; set; }
+    [Parameter] public bool StartOpen { get; set; } = true;
+    [Parameter] public bool Wide { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool open;
+
+    protected override void OnInitialized() => open = StartOpen;
+}
